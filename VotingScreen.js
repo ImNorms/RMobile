@@ -6,12 +6,14 @@ import {
   StyleSheet, 
   Dimensions,
   useWindowDimensions,
-  StatusBar 
+  StatusBar,
+  Alert
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { db } from "./firebaseConfig";
 import { collection, onSnapshot } from "firebase/firestore";
+import { getAuth, signOut } from "firebase/auth";
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,6 +38,19 @@ export default function VotingScreen({ navigation }) {
     });
     return unsubscribe;
   }, []);
+
+  const handleLogout = async () => {
+    const auth = getAuth();
+    try {
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "LoginScreen" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout Failed", error.message);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -160,6 +175,33 @@ export default function VotingScreen({ navigation }) {
           />
         </TouchableOpacity>
       </View>
+
+      {/* Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("AccountScreen")}
+        >
+          <Ionicons name="person-circle-outline" size={responsiveSize(26)} color="#fff" />
+          <Text style={styles.footerText}>Account</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("HomeScreen")}
+        >
+          <Ionicons name="home-outline" size={responsiveSize(26)} color="#fff" />
+          <Text style={styles.footerText}>Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={handleLogout}
+        >
+          <Ionicons name="log-out-outline" size={responsiveSize(26)} color="#fff" />
+          <Text style={styles.footerText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -171,7 +213,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: "#00695C",
-    paddingTop: responsiveSize(50), // Reduced from 60
+    paddingTop: responsiveSize(50),
     paddingBottom: responsiveSize(20),
     paddingHorizontal: Math.max(responsiveSize(20), 16),
     borderBottomLeftRadius: responsiveSize(25),
@@ -183,11 +225,11 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
   },
   landscapeHeader: {
-    paddingTop: responsiveSize(30), // Reduced from 40
+    paddingTop: responsiveSize(30),
     paddingBottom: responsiveSize(15),
   },
   tabletHeader: {
-    paddingTop: responsiveSize(50), // Reduced from 70
+    paddingTop: responsiveSize(50),
     paddingBottom: responsiveSize(25),
   },
   headerTitle: {
@@ -205,15 +247,15 @@ const styles = StyleSheet.create({
   menuContainer: { 
     flex: 1, 
     padding: Math.max(responsiveSize(20), 16),
-    paddingTop: responsiveSize(20), // Reduced from 30
+    paddingTop: responsiveSize(20),
   },
   landscapeMenuContainer: {
     padding: responsiveSize(16),
-    paddingTop: responsiveSize(15), // Reduced from 20
+    paddingTop: responsiveSize(15),
   },
   tabletMenuContainer: {
     padding: responsiveSize(30),
-    paddingTop: responsiveSize(25), // Reduced from 40
+    paddingTop: responsiveSize(25),
   },
   card: {
     flexDirection: "row",
@@ -266,5 +308,28 @@ const styles = StyleSheet.create({
   tabletCardText: {
     fontSize: responsiveSize(20),
     marginLeft: responsiveSize(16),
+  },
+
+  // Footer Styles
+  footer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 12,
+    backgroundColor: "#004d40",
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  footerButton: {
+    alignItems: "center",
+  },
+  footerText: {
+    color: "#fff",
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: "center",
   },
 });

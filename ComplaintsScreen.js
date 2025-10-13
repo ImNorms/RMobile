@@ -12,7 +12,7 @@ import {
   Alert,
 } from "react-native";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getAuth, signOut } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -35,9 +35,9 @@ export default function ComplaintsScreen({ navigation }) {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((doc) => ({ 
-        id: doc.id, 
-        ...doc.data() 
+      const list = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
       }));
       setComplaints(list);
       setLoading(false);
@@ -45,6 +45,19 @@ export default function ComplaintsScreen({ navigation }) {
 
     return unsubscribe;
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth();
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout failed", error.message);
+    }
+  };
 
   const handleFileOpen = async (url, fileName) => {
     try {
@@ -62,27 +75,27 @@ export default function ComplaintsScreen({ navigation }) {
 
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
-      case 'pending':
-        return '#ff9500';
-      case 'resolved':
-        return '#34c759';
-      case 'in-progress':
-        return '#007aff';
+      case "pending":
+        return "#ff9500";
+      case "resolved":
+        return "#34c759";
+      case "in-progress":
+        return "#007aff";
       default:
-        return '#8e8e93';
+        return "#8e8e93";
     }
   };
 
   const getStatusIcon = (status) => {
     switch (status?.toLowerCase()) {
-      case 'pending':
-        return 'time-outline';
-      case 'resolved':
-        return 'checkmark-circle-outline';
-      case 'in-progress':
-        return 'refresh-outline';
+      case "pending":
+        return "time-outline";
+      case "resolved":
+        return "checkmark-circle-outline";
+      case "in-progress":
+        return "refresh-outline";
       default:
-        return 'help-circle-outline';
+        return "help-circle-outline";
     }
   };
 
@@ -92,15 +105,15 @@ export default function ComplaintsScreen({ navigation }) {
   };
 
   const getFileIcon = (fileName, fileType) => {
-    if (isImageFile('', fileName)) return 'image-outline';
-    if (fileName?.includes('.pdf')) return 'document-text-outline';
-    if (fileName?.includes('.doc')) return 'document-outline';
-    if (fileName?.includes('.xls')) return 'grid-outline';
-    return 'document-outline';
+    if (isImageFile("", fileName)) return "image-outline";
+    if (fileName?.includes(".pdf")) return "document-text-outline";
+    if (fileName?.includes(".doc")) return "document-outline";
+    if (fileName?.includes(".xls")) return "grid-outline";
+    return "document-outline";
   };
 
   const formatFileSize = (size) => {
-    if (!size) return '';
+    if (!size) return "";
     if (size < 1024) return `${size} B`;
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
@@ -108,7 +121,7 @@ export default function ComplaintsScreen({ navigation }) {
 
   const renderAttachment = (attachment, index) => {
     const isImage = isImageFile(attachment.url, attachment.name);
-    
+
     return (
       <TouchableOpacity
         key={index}
@@ -117,8 +130,8 @@ export default function ComplaintsScreen({ navigation }) {
       >
         {isImage ? (
           <View style={styles.imageContainer}>
-            <Image 
-              source={{ uri: attachment.url }} 
+            <Image
+              source={{ uri: attachment.url }}
               style={styles.attachmentImage}
               resizeMode="cover"
             />
@@ -128,19 +141,17 @@ export default function ComplaintsScreen({ navigation }) {
           </View>
         ) : (
           <View style={styles.fileContainer}>
-            <Ionicons 
-              name={getFileIcon(attachment.name, attachment.type)} 
-              size={40} 
-              color="#007AFF" 
+            <Ionicons
+              name={getFileIcon(attachment.name, attachment.type)}
+              size={40}
+              color="#007AFF"
             />
             <View style={styles.fileInfo}>
               <Text style={styles.fileName} numberOfLines={2}>
-                {attachment.name || 'Unknown file'}
+                {attachment.name || "Unknown file"}
               </Text>
               {attachment.size && (
-                <Text style={styles.fileSize}>
-                  {formatFileSize(attachment.size)}
-                </Text>
+                <Text style={styles.fileSize}>{formatFileSize(attachment.size)}</Text>
               )}
             </View>
           </View>
@@ -151,53 +162,51 @@ export default function ComplaintsScreen({ navigation }) {
 
   const renderItem = ({ item }) => (
     <View style={styles.complaintCard}>
-      {/* Header */}
       <View style={styles.complaintHeader}>
         <View style={styles.statusContainer}>
-          <Ionicons 
-            name={getStatusIcon(item.status)} 
-            size={16} 
-            color={getStatusColor(item.status)} 
+          <Ionicons
+            name={getStatusIcon(item.status)}
+            size={16}
+            color={getStatusColor(item.status)}
           />
           <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {(item.status || 'unknown').toUpperCase()}
+            {(item.status || "unknown").toUpperCase()}
           </Text>
         </View>
         <Text style={styles.dateText}>
-          {item.createdAt ? new Date(item.createdAt.seconds * 1000).toLocaleDateString() : 'No date'}
+          {item.createdAt
+            ? new Date(item.createdAt.seconds * 1000).toLocaleDateString()
+            : "No date"}
         </Text>
       </View>
 
-      {/* Personal Info */}
       <View style={styles.infoSection}>
         <Text style={styles.infoLabel}>Name:</Text>
-        <Text style={styles.infoValue}>{item.name || 'N/A'}</Text>
-      </View>
-      
-      <View style={styles.infoSection}>
-        <Text style={styles.infoLabel}>Contact:</Text>
-        <Text style={styles.infoValue}>{item.contactNo || 'N/A'}</Text>
-      </View>
-      
-      <View style={styles.infoSection}>
-        <Text style={styles.infoLabel}>Address:</Text>
-        <Text style={styles.infoValue}>{item.address || 'N/A'}</Text>
+        <Text style={styles.infoValue}>{item.name || "N/A"}</Text>
       </View>
 
-      {/* Complaint Text */}
+      <View style={styles.infoSection}>
+        <Text style={styles.infoLabel}>Contact:</Text>
+        <Text style={styles.infoValue}>{item.contactNo || "N/A"}</Text>
+      </View>
+
+      <View style={styles.infoSection}>
+        <Text style={styles.infoLabel}>Address:</Text>
+        <Text style={styles.infoValue}>{item.address || "N/A"}</Text>
+      </View>
+
       <View style={styles.complaintSection}>
         <Text style={styles.complaintLabel}>Complaint:</Text>
         <Text style={styles.complaintText}>{item.complaint}</Text>
       </View>
 
-      {/* Attachments */}
       {item.attachments && item.attachments.length > 0 && (
         <View style={styles.attachmentsSection}>
           <Text style={styles.attachmentsLabel}>
             Attachments ({item.attachments.length})
           </Text>
           <View style={styles.attachmentsList}>
-            {item.attachments.map((attachment, index) => 
+            {item.attachments.map((attachment, index) =>
               renderAttachment(attachment, index)
             )}
           </View>
@@ -218,7 +227,7 @@ export default function ComplaintsScreen({ navigation }) {
   return (
     <View style={styles.wrapper}>
       <Text style={styles.title}>My Complaints</Text>
-      
+
       <FlatList
         data={complaints}
         keyExtractor={(item) => item.id}
@@ -236,7 +245,6 @@ export default function ComplaintsScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Floating Action Button */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate("FileComplaint")}
@@ -244,28 +252,24 @@ export default function ComplaintsScreen({ navigation }) {
         <Ionicons name="add" size={30} color="white" />
       </TouchableOpacity>
 
-      {/* Footer */}
       <View style={styles.footer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.footerButton}
           onPress={() => navigation.navigate("Profile")}
         >
           <Ionicons name="person-circle" size={22} color="#fff" />
           <Text style={styles.footerText}>Account</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.footerButton}
           onPress={() => navigation.navigate("Home")}
         >
           <Ionicons name="home" size={22} color="#fff" />
           <Text style={styles.footerText}>Home</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.footerButton}
-          onPress={() => navigation.replace("Login")}
-        >
+
+        <TouchableOpacity style={styles.footerButton} onPress={handleLogout}>
           <Ionicons name="log-out" size={22} color="#fff" />
           <Text style={styles.footerText}>Log out</Text>
         </TouchableOpacity>

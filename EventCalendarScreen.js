@@ -175,14 +175,18 @@ export default function EventCalendarScreen({ navigation, route }) {
     }
   }, [events]);
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigation.replace("Login");
-    } catch (error) {
-      Alert.alert("Logout failed", error.message);
-    }
-  };
+ const handleLogout = async () => {
+  try {
+    await signOut(auth);
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Login" }],
+    });
+  } catch (error) {
+    Alert.alert("Logout failed", error.message);
+  }
+};
+
 
   const renderEvent = ({ item }) => {
     const eventDate = item.dateObj;

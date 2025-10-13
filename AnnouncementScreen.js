@@ -15,6 +15,7 @@ import {
   Platform,
   Dimensions,
   Keyboard,
+  Alert,
 } from "react-native";
 import {
   collection,
@@ -34,7 +35,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import { getAuth } from "firebase/auth";
+import { getAuth, signOut } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -64,6 +65,19 @@ export default function AnnouncementScreen({ navigation }) {
   const storage = getStorage();
 
   const adminUIDs = ["ADMIN_UID_1", "ADMIN_UID_2"];
+
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth();
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout failed", error.message);
+    }
+  };
 
   // Keyboard listeners
   useEffect(() => {
@@ -1000,14 +1014,38 @@ export default function AnnouncementScreen({ navigation }) {
           )}
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("Profile")}
+        >
+          <Ionicons name="person-circle" size={22} color="#fff" />
+          <Text style={styles.footerText}>Account</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.footerText}>Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.footerButton} onPress={handleLogout}>
+          <Ionicons name="log-out" size={22} color="#fff" />
+          <Text style={styles.footerText}>Log out</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    backgroundColor: "#f0f2f5",
+  wrapper: { 
+    flex: 1, 
+    backgroundColor: "#f8f9fa" 
   },
   center: {
     flex: 1,
@@ -1450,5 +1488,28 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#f0f0f0',
+  },
+
+  // Footer Styles
+  footer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 12,
+    backgroundColor: "#004d40",
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  footerButton: {
+    alignItems: "center",
+  },
+  footerText: {
+    color: "#fff",
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: "center",
   },
 });

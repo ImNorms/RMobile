@@ -9,10 +9,12 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  useWindowDimensions
+  useWindowDimensions,
+  Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { getAuth, signOut } from "firebase/auth";
 import { db } from "./firebaseConfig";
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -22,7 +24,7 @@ const responsiveSize = (size) => {
   return Math.round(size * Math.min(scale, 1.5));
 };
 
-export default function CommitteeScreen() {
+export default function CommitteeScreen({ navigation }) {
   const [selectedCommittee, setSelectedCommittee] = useState("HOA Board of Members");
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -132,6 +134,19 @@ export default function CommitteeScreen() {
   const getCommitteeColor = () => {
     const committee = committees.find(c => c.name === selectedCommittee);
     return committee ? committee.color : "#00695C";
+  };
+
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth();
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout failed", error.message);
+    }
   };
 
   return (
@@ -283,6 +298,33 @@ export default function CommitteeScreen() {
             )}
           </Animated.ScrollView>
         )}
+      </View>
+
+      {/* Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("Profile")}
+        >
+          <Ionicons name="person-circle" size={22} color="#fff" />
+          <Text style={styles.footerText}>Account</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.footerText}>Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerButton}
+          onPress={handleLogout}
+        >
+          <Ionicons name="log-out" size={22} color="#fff" />
+          <Text style={styles.footerText}>Logout</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -572,5 +614,22 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     textAlign: "center",
     lineHeight: responsiveSize(20),
+  },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "#00695C",
+    paddingVertical: 10,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  footerButton: {
+    alignItems: "center",
+  },
+  footerText: {
+    color: "#fff",
+    fontSize: 13,
+    marginTop: 4,
   },
 });
