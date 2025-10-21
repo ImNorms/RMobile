@@ -21,13 +21,14 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 // ✅ Firebase imports
-import { auth } from './firebaseConfig';
+import { auth, db } from './firebaseConfig';
 import { 
   signInWithEmailAndPassword, 
   sendPasswordResetEmail,
   confirmPasswordReset,
   verifyPasswordResetCode
 } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -35,6 +36,7 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   
   // Forgot Password Modal States
   const [forgotPasswordModal, setForgotPasswordModal] = useState(false);
@@ -43,9 +45,14 @@ export default function LoginScreen({ navigation }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
-  const [resetStep, setResetStep] = useState(1); // 1: email, 2: code, 3: new password
+  const [resetStep, setResetStep] = useState(1);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  // ✅ Toggle password visibility
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
 
   // ✅ Keyboard listeners
   useEffect(() => {
@@ -76,7 +83,33 @@ export default function LoginScreen({ navigation }) {
     Keyboard.dismiss();
   };
 
-  // ✅ Login with Firebase
+  // ✅ Check if member is deleted
+  const checkMemberStatus = async (userEmail) => {
+    try {
+      // Query Firestore to find the member with this email
+      const membersRef = collection(db, "members");
+      const q = query(membersRef, where("email", "==", userEmail));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const memberDoc = querySnapshot.docs[0];
+        const memberData = memberDoc.data();
+        
+        // Check if member status is "Deleted"
+        if (memberData.status === "Deleted") {
+          return false; // Member is deleted
+        }
+        return true; // Member is active/inactive but not deleted
+      }
+      
+      return true; // If no member record found, allow login (fallback)
+    } catch (error) {
+      console.error("Error checking member status:", error);
+      return true; // If there's an error, allow login as fallback
+    }
+  };
+
+  // ✅ Login with Firebase - UPDATED WITH STATUS CHECK
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert("Error", "Please enter your email and password");
@@ -87,6 +120,22 @@ export default function LoginScreen({ navigation }) {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       console.log("Logged in:", userCredential.user.email);
+      
+      // ✅ Check if member is deleted before allowing access
+      const isMemberActive = await checkMemberStatus(userCredential.user.email);
+      
+      if (!isMemberActive) {
+        // Sign out the user immediately if they are deleted
+        await auth.signOut();
+        Alert.alert(
+          "Account Disabled", 
+          "Your account has been deactivated. Please contact the administrator for assistance.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+      
+      // If member is not deleted, proceed to home screen
       navigation.replace("Home", { userEmail: userCredential.user.email });
     } catch (error) {
       console.error("Login error:", error.code);
@@ -97,6 +146,8 @@ export default function LoginScreen({ navigation }) {
         message = "No account found with this email.";
       } else if (error.code === "auth/wrong-password") {
         message = "Incorrect password.";
+      } else if (error.code === "auth/too-many-requests") {
+        message = "Too many failed login attempts. Please try again later.";
       }
       Alert.alert("Login Failed", message);
     } finally {
@@ -104,79 +155,45 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // ✅ Extract OOB code from Firebase URL - IMPROVED VERSION
-  const extractOobCodeFromUrl = (url) => {
+  // ✅ Check member status for password reset - PREVENT DELETED MEMBERS FROM RESETTING
+  const checkMemberStatusBeforeReset = async (userEmail) => {
     try {
-      console.log("Extracting code from URL:", url);
+      const membersRef = collection(db, "members");
+      const q = query(membersRef, where("email", "==", userEmail));
+      const querySnapshot = await getDocs(q);
       
-      // Remove any extra spaces or quotes
-      const cleanUrl = url.trim().replace(/['"]/g, '');
-      
-      // Method 1: If it contains oobCode parameter, extract it (even without http)
-      if (cleanUrl.includes('oobCode=')) {
-        const oobCodeMatch = cleanUrl.match(/oobCode=([^&]+)/);
-        if (oobCodeMatch && oobCodeMatch[1]) {
-          const extractedCode = oobCodeMatch[1];
-          console.log("Extracted OOB code via regex:", extractedCode);
-          return extractedCode;
+      if (!querySnapshot.empty) {
+        const memberDoc = querySnapshot.docs[0];
+        const memberData = memberDoc.data();
+        
+        if (memberData.status === "Deleted") {
+          return false; // Member is deleted
         }
+        return true; // Member can reset password
       }
       
-      // Method 2: Use URL constructor if it's a full URL
-      if (cleanUrl.includes('http')) {
-        try {
-          const urlObj = new URL(cleanUrl);
-          const oobCode = urlObj.searchParams.get('oobCode');
-          console.log("Extracted OOB code from URL:", oobCode);
-          return oobCode;
-        } catch (urlError) {
-          console.log("URL constructor failed, trying regex");
-        }
-      }
-      
-      // Method 3: If it's already just the code (no &, no =, no spaces)
-      if (cleanUrl.length > 20 && !cleanUrl.includes('&') && !cleanUrl.includes('=') && !cleanUrl.includes(' ')) {
-        console.log("Input appears to be raw OOB code");
-        return cleanUrl;
-      }
-      
-      console.log("Could not extract OOB code from input");
-      return null;
+      return true; // If no member record found, allow reset (fallback)
     } catch (error) {
-      console.error("Error extracting OOB code:", error);
-      return null;
+      console.error("Error checking member status for reset:", error);
+      return true; // If error, allow reset as fallback
     }
   };
 
-  // ✅ Clean and validate OOB code - IMPROVED VERSION
-  const cleanOobCode = (code) => {
-    if (!code) return null;
-    
-    console.log("Cleaning code:", code);
-    
-    // First, try to extract from any URL-like string
-    const extracted = extractOobCodeFromUrl(code);
-    if (extracted) {
-      console.log("Cleaned via extraction:", extracted);
-      return extracted;
-    }
-    
-    // If extraction didn't work, clean the input directly
-    let cleanCode = code.trim();
-    
-    // Remove any URL fragments or extra parameters
-    cleanCode = cleanCode.split('&')[0]; // Remove everything after &
-    cleanCode = cleanCode.split('?')[0]; // Remove everything after ?
-    cleanCode = cleanCode.split(' ')[0]; // Remove everything after space
-    
-    console.log("Cleaned OOB code:", cleanCode);
-    return cleanCode;
-  };
-
-  // ✅ Send Password Reset Email
+  // ✅ Send Password Reset Email - UPDATED WITH STATUS CHECK
   const handleSendResetEmail = async () => {
     if (!resetEmail) {
       Alert.alert("Error", "Please enter your email address");
+      return;
+    }
+
+    // ✅ Check if member is deleted before allowing password reset
+    const canResetPassword = await checkMemberStatusBeforeReset(resetEmail);
+    if (!canResetPassword) {
+      Alert.alert(
+        "Account Disabled", 
+        "This account has been deactivated. Password reset is not allowed. Please contact the administrator.",
+        [{ text: "OK" }]
+      );
       return;
     }
 
@@ -225,7 +242,68 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // ✅ Verify Reset Code - IMPROVED VERSION
+  // ✅ Extract OOB code from Firebase URL
+  const extractOobCodeFromUrl = (url) => {
+    try {
+      console.log("Extracting code from URL:", url);
+      
+      const cleanUrl = url.trim().replace(/['"]/g, '');
+      
+      if (cleanUrl.includes('oobCode=')) {
+        const oobCodeMatch = cleanUrl.match(/oobCode=([^&]+)/);
+        if (oobCodeMatch && oobCodeMatch[1]) {
+          const extractedCode = oobCodeMatch[1];
+          console.log("Extracted OOB code via regex:", extractedCode);
+          return extractedCode;
+        }
+      }
+      
+      if (cleanUrl.includes('http')) {
+        try {
+          const urlObj = new URL(cleanUrl);
+          const oobCode = urlObj.searchParams.get('oobCode');
+          console.log("Extracted OOB code from URL:", oobCode);
+          return oobCode;
+        } catch (urlError) {
+          console.log("URL constructor failed, trying regex");
+        }
+      }
+      
+      if (cleanUrl.length > 20 && !cleanUrl.includes('&') && !cleanUrl.includes('=') && !cleanUrl.includes(' ')) {
+        console.log("Input appears to be raw OOB code");
+        return cleanUrl;
+      }
+      
+      console.log("Could not extract OOB code from input");
+      return null;
+    } catch (error) {
+      console.error("Error extracting OOB code:", error);
+      return null;
+    }
+  };
+
+  // ✅ Clean and validate OOB code
+  const cleanOobCode = (code) => {
+    if (!code) return null;
+    
+    console.log("Cleaning code:", code);
+    
+    const extracted = extractOobCodeFromUrl(code);
+    if (extracted) {
+      console.log("Cleaned via extraction:", extracted);
+      return extracted;
+    }
+    
+    let cleanCode = code.trim();
+    cleanCode = cleanCode.split('&')[0];
+    cleanCode = cleanCode.split('?')[0];
+    cleanCode = cleanCode.split(' ')[0];
+    
+    console.log("Cleaned OOB code:", cleanCode);
+    return cleanCode;
+  };
+
+  // ✅ Verify Reset Code
   const handleVerifyCode = async () => {
     if (!resetCode) {
       Alert.alert("Error", "Please enter the reset code from your email");
@@ -236,21 +314,17 @@ export default function LoginScreen({ navigation }) {
     try {
       console.log("Original reset code input:", resetCode);
       
-      // Extract and clean the OOB code
       let actualCode = extractOobCodeFromUrl(resetCode);
       
       if (!actualCode) {
-        // If extraction failed, try cleaning the input directly
         actualCode = cleanOobCode(resetCode);
       }
       
-      // Validate the code format
       if (!actualCode) {
         Alert.alert("Error", "Could not extract valid reset code. Please paste the entire reset link or just the code part.");
         return;
       }
       
-      // Additional validation: OOB codes should be a specific format
       if (actualCode.includes('&') || actualCode.includes('?') || actualCode.includes(' ')) {
         Alert.alert("Invalid Format", "The reset code contains invalid characters. Please paste only the code part (without &apiKey= or other parameters).");
         return;
@@ -258,13 +332,21 @@ export default function LoginScreen({ navigation }) {
       
       console.log("Final OOB code to verify:", actualCode);
       
-      // Verify the reset code is valid
       const verifiedEmail = await verifyPasswordResetCode(auth, actualCode);
       console.log("Code verified for email:", verifiedEmail);
       
-      // Update the input field with the clean code
-      setResetCode(actualCode);
+      // ✅ Check if the member being reset is deleted
+      const canResetPassword = await checkMemberStatusBeforeReset(verifiedEmail);
+      if (!canResetPassword) {
+        Alert.alert(
+          "Account Disabled", 
+          "This account has been deactivated. Password reset is not allowed. Please contact the administrator.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
       
+      setResetCode(actualCode);
       setResetStep(3);
       
     } catch (error) {
@@ -293,7 +375,7 @@ NOT the entire string with &apiKey=...`;
     }
   };
 
-  // ✅ Confirm Password Reset - IMPROVED VERSION
+  // ✅ Confirm Password Reset
   const handleConfirmPasswordReset = async () => {
     if (!newPassword || !confirmNewPassword) {
       Alert.alert("Error", "Please enter and confirm your new password");
@@ -314,10 +396,8 @@ NOT the entire string with &apiKey=...`;
     try {
       console.log("Using reset code for confirmation:", resetCode);
       
-      // Use the already cleaned code (from verification step)
       let actualCode = resetCode;
       
-      // If user went back and modified the code, clean it again
       if (resetCode.includes('http') || resetCode.includes(' ')) {
         actualCode = extractOobCodeFromUrl(resetCode) || cleanOobCode(resetCode);
       }
@@ -377,7 +457,7 @@ NOT the entire string with &apiKey=...`;
     Alert.alert("Test", "Example code filled. Click 'Verify Code' to test.");
   };
 
-  // ✅ Render Code Instructions - IMPROVED VERSION
+  // ✅ Render Code Instructions
   const renderCodeInstructions = () => (
     <View style={styles.instructions}>
       <Text style={styles.instructionsTitle}>📋 How to get your reset code CORRECTLY:</Text>
@@ -623,16 +703,26 @@ NOT the entire string with &apiKey=...`;
             <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.icon} />
             <TextInput
               placeholder="Password"
-              secureTextEntry
+              secureTextEntry={!showPassword}
               value={password}
               onChangeText={setPassword}
               style={styles.input}
               returnKeyType="done"
               onSubmitEditing={dismissKeyboard}
             />
+            <TouchableOpacity onPress={togglePasswordVisibility} style={styles.eyeIcon}>
+              <Ionicons 
+                name={showPassword ? "eye-outline" : "eye-off-outline"} 
+                size={20} 
+                color="#666" 
+              />
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity onPress={() => setForgotPasswordModal(true)}>
+          <TouchableOpacity 
+            style={styles.forgotPasswordContainer}
+            onPress={() => setForgotPasswordModal(true)}
+          >
             <Text style={styles.forgotPassword}>Forgot password?</Text>
           </TouchableOpacity>
 
@@ -649,7 +739,7 @@ NOT the entire string with &apiKey=...`;
           </TouchableOpacity>
         </View>
 
-        {/* Forgot Password Modal - FIXED VERSION */}
+        {/* Forgot Password Modal */}
         <Modal
           visible={forgotPasswordModal}
           animationType="slide"
@@ -661,7 +751,7 @@ NOT the entire string with &apiKey=...`;
               <KeyboardAvoidingView 
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.keyboardAvoidingView}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -500} // Adjust this value
+                keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -500}
               >
                 <View style={styles.modalContent}>
                   <ScrollView 
@@ -680,6 +770,9 @@ NOT the entire string with &apiKey=...`;
     </TouchableWithoutFeedback>
   );
 }
+
+// Add the missing import at the top of the file
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const styles = StyleSheet.create({
   container: {
@@ -729,20 +822,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
     borderRadius: 10,
     marginBottom: 15,
-    paddingHorizontal: 10
+    paddingHorizontal: 10,
+    position: "relative"
   },
   input: {
     flex: 1,
     padding: 10,
-    minHeight: 40
+    minHeight: 40,
+    paddingRight: 40
   },
   icon: {
     marginRight: 5
   },
-  forgotPassword: {
+  eyeIcon: {
+    position: "absolute",
+    right: 10,
+    padding: 5
+  },
+  forgotPasswordContainer: {
     alignSelf: "flex-end",
-    color: "#004d40",
     marginBottom: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  forgotPassword: {
+    color: "#004d40",
     fontSize: 12
   },
   button: {
@@ -756,11 +860,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold"
   },
-  // Modal Styles - FIXED VERSION
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end", // Changed from "center" to "flex-end"
+    justifyContent: "flex-end",
   },
   keyboardAvoidingView: {
     width: "100%",
@@ -771,11 +874,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 25,
     width: "100%",
-    maxHeight: "85%", // Reduced from 80% to 85%
+    maxHeight: "85%",
   },
   modalScrollContent: {
     flexGrow: 1,
-    paddingBottom: 20, // Add some bottom padding
+    paddingBottom: 20,
   },
   modalStepContainer: {
     minHeight: 200,

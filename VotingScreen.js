@@ -40,23 +40,23 @@ export default function VotingScreen({ navigation }) {
   }, []);
 
   const handleLogout = async () => {
-    const auth = getAuth();
     try {
+      const auth = getAuth();
       await signOut(auth);
       navigation.reset({
         index: 0,
-        routes: [{ name: "LoginScreen" }],
+        routes: [{ name: "Login" }],
       });
     } catch (error) {
-      Alert.alert("Logout Failed", error.message);
+      Alert.alert("Logout failed", error.message);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <View style={styles.container}>
       <StatusBar backgroundColor="#00695C" barStyle="light-content" />
       
-      {/* Header */}
+      {/* Header - Moved outside SafeAreaView to be at very top */}
       <View style={[
         styles.header,
         isLandscape && styles.landscapeHeader,
@@ -69,128 +69,131 @@ export default function VotingScreen({ navigation }) {
         ]}>Voting</Text>
       </View>
 
-      {/* Menu Container */}
-      <View style={[
-        styles.menuContainer,
-        isLandscape && styles.landscapeMenuContainer,
-        isTablet && styles.tabletMenuContainer
-      ]}>
-        <TouchableOpacity
-          style={[
-            styles.card, 
-            { borderLeftColor: "#00695C" },
-            isSmallScreen && styles.smallCard,
-            isTablet && styles.tabletCard
-          ]}
-          onPress={() =>
-            firstElectionId &&
-            navigation.navigate("ElectionStatus", { eventId: firstElectionId })
-          }
-        >
-          <View style={[
-            styles.cardContent,
-            isSmallScreen && styles.smallCardContent
-          ]}>
+      {/* Main Content */}
+      <SafeAreaView style={styles.mainContent} edges={['left', 'right', 'bottom']}>
+        {/* Menu Container */}
+        <View style={[
+          styles.menuContainer,
+          isLandscape && styles.landscapeMenuContainer,
+          isTablet && styles.tabletMenuContainer
+        ]}>
+          <TouchableOpacity
+            style={[
+              styles.card, 
+              { borderLeftColor: "#00695C" },
+              isSmallScreen && styles.smallCard,
+              isTablet && styles.tabletCard
+            ]}
+            onPress={() =>
+              firstElectionId &&
+              navigation.navigate("ElectionStatus", { eventId: firstElectionId })
+            }
+          >
+            <View style={[
+              styles.cardContent,
+              isSmallScreen && styles.smallCardContent
+            ]}>
+              <Ionicons 
+                name="stats-chart" 
+                size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+                color="#00695C" 
+              />
+              <Text style={[
+                styles.cardText,
+                isSmallScreen && styles.smallCardText,
+                isTablet && styles.tabletCardText
+              ]}>Election Status</Text>
+            </View>
             <Ionicons 
-              name="stats-chart" 
-              size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+              name="chevron-forward" 
+              size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
               color="#00695C" 
             />
-            <Text style={[
-              styles.cardText,
-              isSmallScreen && styles.smallCardText,
-              isTablet && styles.tabletCardText
-            ]}>Election Status</Text>
-          </View>
-          <Ionicons 
-            name="chevron-forward" 
-            size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
-            color="#00695C" 
-          />
-        </TouchableOpacity>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.card, 
-            { borderLeftColor: "#2E7D32" },
-            isSmallScreen && styles.smallCard,
-            isTablet && styles.tabletCard
-          ]}
-          onPress={() =>
-            firstElectionId && navigation.navigate("Elections", { eventId: firstElectionId })
-          }
-        >
-          <View style={[
-            styles.cardContent,
-            isSmallScreen && styles.smallCardContent
-          ]}>
+          <TouchableOpacity
+            style={[
+              styles.card, 
+              { borderLeftColor: "#2E7D32" },
+              isSmallScreen && styles.smallCard,
+              isTablet && styles.tabletCard
+            ]}
+            onPress={() =>
+              firstElectionId && navigation.navigate("Elections", { eventId: firstElectionId })
+            }
+          >
+            <View style={[
+              styles.cardContent,
+              isSmallScreen && styles.smallCardContent
+            ]}>
+              <Ionicons 
+                name="people" 
+                size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+                color="#2E7D32" 
+              />
+              <Text style={[
+                styles.cardText,
+                isSmallScreen && styles.smallCardText,
+                isTablet && styles.tabletCardText
+              ]}>Board of Directors Election</Text>
+            </View>
             <Ionicons 
-              name="people" 
-              size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+              name="chevron-forward" 
+              size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
               color="#2E7D32" 
             />
-            <Text style={[
-              styles.cardText,
-              isSmallScreen && styles.smallCardText,
-              isTablet && styles.tabletCardText
-            ]}>Board of Directors Election</Text>
-          </View>
-          <Ionicons 
-            name="chevron-forward" 
-            size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
-            color="#2E7D32" 
-          />
-        </TouchableOpacity>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.card, 
-            { borderLeftColor: "#FBC02D" },
-            isSmallScreen && styles.smallCard,
-            isTablet && styles.tabletCard
-          ]}
-          onPress={() =>
-            firstElectionId && navigation.navigate("MyVotes", { eventId: firstElectionId })
-          }
-        >
-          <View style={[
-            styles.cardContent,
-            isSmallScreen && styles.smallCardContent
-          ]}>
+          <TouchableOpacity
+            style={[
+              styles.card, 
+              { borderLeftColor: "#FBC02D" },
+              isSmallScreen && styles.smallCard,
+              isTablet && styles.tabletCard
+            ]}
+            onPress={() =>
+              firstElectionId && navigation.navigate("MyVotes", { eventId: firstElectionId })
+            }
+          >
+            <View style={[
+              styles.cardContent,
+              isSmallScreen && styles.smallCardContent
+            ]}>
+              <Ionicons 
+                name="clipboard" 
+                size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+                color="#FBC02D" 
+              />
+              <Text style={[
+                styles.cardText,
+                isSmallScreen && styles.smallCardText,
+                isTablet && styles.tabletCardText
+              ]}>View My Votes</Text>
+            </View>
             <Ionicons 
-              name="clipboard" 
-              size={isSmallScreen ? responsiveSize(24) : isTablet ? responsiveSize(32) : responsiveSize(28)} 
+              name="chevron-forward" 
+              size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
               color="#FBC02D" 
             />
-            <Text style={[
-              styles.cardText,
-              isSmallScreen && styles.smallCardText,
-              isTablet && styles.tabletCardText
-            ]}>View My Votes</Text>
-          </View>
-          <Ionicons 
-            name="chevron-forward" 
-            size={isSmallScreen ? responsiveSize(20) : responsiveSize(24)} 
-            color="#FBC02D" 
-          />
-        </TouchableOpacity>
-      </View>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
 
-      {/* Footer */}
+      {/* Footer - Fixed at bottom */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.footerButton}
-          onPress={() => navigation.navigate("AccountScreen")}
+          onPress={() => navigation.navigate("Profile")}
         >
-          <Ionicons name="person-circle-outline" size={responsiveSize(26)} color="#fff" />
+          <Ionicons name="person-circle" size={22} color="#fff" />
           <Text style={styles.footerText}>Account</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.footerButton}
-          onPress={() => navigation.navigate("HomeScreen")}
+          onPress={() => navigation.navigate("Home")}
         >
-          <Ionicons name="home-outline" size={responsiveSize(26)} color="#fff" />
+          <Ionicons name="home" size={22} color="#fff" />
           <Text style={styles.footerText}>Home</Text>
         </TouchableOpacity>
 
@@ -198,11 +201,11 @@ export default function VotingScreen({ navigation }) {
           style={styles.footerButton}
           onPress={handleLogout}
         >
-          <Ionicons name="log-out-outline" size={responsiveSize(26)} color="#fff" />
+          <Ionicons name="log-out" size={22} color="#fff" />
           <Text style={styles.footerText}>Logout</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -213,36 +216,39 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: "#00695C",
-    paddingTop: responsiveSize(50),
-    paddingBottom: responsiveSize(20),
+    paddingTop: responsiveSize(40), // Increased padding to account for status bar
+    paddingBottom: responsiveSize(15),
     paddingHorizontal: Math.max(responsiveSize(20), 16),
-    borderBottomLeftRadius: responsiveSize(25),
-    borderBottomRightRadius: responsiveSize(25),
-    elevation: 8,
+    borderBottomLeftRadius: responsiveSize(20),
+    borderBottomRightRadius: responsiveSize(20),
+    elevation: 4,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
   },
   landscapeHeader: {
     paddingTop: responsiveSize(30),
-    paddingBottom: responsiveSize(15),
+    paddingBottom: responsiveSize(10),
   },
   tabletHeader: {
-    paddingTop: responsiveSize(50),
-    paddingBottom: responsiveSize(25),
+    paddingTop: responsiveSize(45),
+    paddingBottom: responsiveSize(20),
   },
   headerTitle: {
-    fontSize: responsiveSize(28),
+    fontSize: responsiveSize(22),
     fontWeight: "bold",
     color: "#fff",
     textAlign: "center",
   },
   smallHeaderTitle: {
-    fontSize: responsiveSize(24),
+    fontSize: responsiveSize(20),
   },
   tabletHeaderTitle: {
-    fontSize: responsiveSize(32),
+    fontSize: responsiveSize(26),
+  },
+  mainContent: {
+    flex: 1,
   },
   menuContainer: { 
     flex: 1, 
@@ -314,22 +320,20 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "#00695C",
     paddingVertical: 12,
-    backgroundColor: "#004d40",
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    borderTopWidth: 1,
+    borderTopColor: "#004D40",
   },
   footerButton: {
     alignItems: "center",
+    paddingHorizontal: 10,
   },
   footerText: {
     color: "#fff",
     fontSize: 12,
-    marginTop: 3,
-    textAlign: "center",
+    marginTop: 4,
+    fontWeight: "500",
   },
 });

@@ -23,6 +23,34 @@ const responsiveSize = (size) => {
   return Math.round(size * Math.min(scale, 1.5));
 };
 
+// Status configuration - Removed Deleted status
+const STATUS_CONFIG = {
+  "Active": {
+    label: "Active Member",
+    icon: "checkmark-circle",
+    color: "#059669",
+    bgColor: "#f0fdf4",
+    indicatorColor: "#10B981",
+    priority: 0
+  },
+  "New": {
+    label: "New Member",
+    icon: "person-add",
+    color: "#2563EB",
+    bgColor: "#eff6ff",
+    indicatorColor: "#3B82F6",
+    priority: 1
+  },
+  "Inactive": {
+    label: "Inactive Member",
+    icon: "time-outline",
+    color: "#DC2626",
+    bgColor: "#fef2f2",
+    indicatorColor: "#EF4444",
+    priority: 2
+  }
+};
+
 export default function MembersScreen({ navigation }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,10 +68,29 @@ export default function MembersScreen({ navigation }) {
           ...doc.data(),
         }));
 
+        // Filter out deleted members
+        data = data.filter(member => member.status !== "Deleted");
+
+        // Sort members: current user first, then by status priority, then by surname
         data.sort((a, b) => {
-          const isAActive = currentUser && a.id === currentUser.uid;
-          const isBActive = currentUser && b.id === currentUser.uid;
-          return isBActive - isAActive;
+          // Current user always first
+          const isACurrent = currentUser && a.email === currentUser.email;
+          const isBCurrent = currentUser && b.email === currentUser.email;
+          if (isACurrent && !isBCurrent) return -1;
+          if (!isACurrent && isBCurrent) return 1;
+
+          // Status priority based on your database values
+          const aStatus = a.status || "Inactive";
+          const bStatus = b.status || "Inactive";
+          const aPriority = STATUS_CONFIG[aStatus]?.priority ?? 2;
+          const bPriority = STATUS_CONFIG[bStatus]?.priority ?? 2;
+          
+          if (aPriority !== bPriority) return aPriority - bPriority;
+
+          // Then sort by surname (using your database field)
+          const aName = a.surname || a.name || "";
+          const bName = b.surname || b.name || "";
+          return aName.localeCompare(bName);
         });
 
         setMembers(data);
@@ -52,6 +99,7 @@ export default function MembersScreen({ navigation }) {
       (error) => {
         console.error("Error fetching members: ", error);
         setLoading(false);
+        Alert.alert("Error", "Failed to load members");
       }
     );
 
@@ -70,7 +118,19 @@ export default function MembersScreen({ navigation }) {
     }
   };
 
-  const getInitials = (name) => {
+  const getInitials = (member) => {
+    // Use firstname and surname from your database structure
+    const firstName = member.firstname || "";
+    const surname = member.surname || "";
+    
+    if (!firstName && !surname) {
+      return member.name ? getInitialsFromName(member.name) : "?";
+    }
+    
+    return `${firstName.charAt(0)}${surname.charAt(0)}`.toUpperCase();
+  };
+
+  const getInitialsFromName = (name) => {
     if (!name) return "?";
     return name
       .split(" ")
@@ -82,18 +142,48 @@ export default function MembersScreen({ navigation }) {
 
   const getRandomColor = (id) => {
     const colors = [
-      "#FF6B6B",
-      "#4ECDC4",
-      "#45B7D1",
-      "#96CEB4",
-      "#FFEAA7",
-      "#DDA0DD",
-      "#98D8C8",
-      "#F7DC6F",
-      "#BB8FCE",
-      "#85C1E9",
+      "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7",
+      "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE", "#85C1E9",
     ];
     return colors[(id?.charCodeAt(0) || 0) % colors.length];
+  };
+
+  const getFullName = (member) => {
+    // Construct full name from your database fields
+    const firstName = member.firstname || "";
+    const middleName = member.middlename ? `${member.middlename.charAt(0)}.` : "";
+    const surname = member.surname || "";
+    
+    if (firstName && surname) {
+      return middleName ? `${firstName} ${middleName} ${surname}` : `${firstName} ${surname}`;
+    }
+    
+    return member.name || "Unnamed Member";
+  };
+
+  const getStatusConfig = (member) => {
+    // Use the status field directly from your database
+    const status = member.status || "Inactive";
+    return STATUS_CONFIG[status] || STATUS_CONFIG["Inactive"];
+  };
+
+  const isNewMember = (member) => {
+    // Determine if member is new based on join date or account number
+    if (member.accNo) {
+      // Assuming lower account numbers are older members
+      const accNo = parseInt(member.accNo) || 0;
+      return accNo > 100; // Adjust this logic based on your numbering system
+    }
+    
+    // Or check join date if you have it
+    if (member.joinDate) {
+      const joinDate = new Date(member.joinDate);
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      return joinDate > thirtyDaysAgo;
+    }
+    
+    return false;
   };
 
   if (loading) {
@@ -106,14 +196,17 @@ export default function MembersScreen({ navigation }) {
   }
 
   const renderMemberCard = ({ item }) => {
-    const isActiveUser = currentUser && item.id === currentUser.uid;
+    const isCurrentUser = currentUser && item.email === currentUser.email;
     const avatarColor = getRandomColor(item.id);
+    const statusConfig = getStatusConfig(item);
+    const fullName = getFullName(item);
+    const isNew = isNewMember(item);
 
     return (
       <View
         style={[
           styles.memberCard,
-          isActiveUser && styles.activeUserCard,
+          isCurrentUser && styles.currentUserCard,
           isLandscape && styles.landscapeCard,
         ]}
       >
@@ -128,33 +221,50 @@ export default function MembersScreen({ navigation }) {
                   { backgroundColor: avatarColor },
                 ]}
               >
-                <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+                <Text style={styles.avatarText}>{getInitials(item)}</Text>
               </View>
             )}
             <View
               style={[
                 styles.statusIndicator,
-                isActiveUser ? styles.activeIndicator : styles.inactiveIndicator,
+                { backgroundColor: statusConfig.indicatorColor },
               ]}
             />
           </View>
 
-          <View
-            style={[styles.memberInfo, isLandscape && styles.landscapeMemberInfo]}
-          >
+          <View style={[styles.memberInfo, isLandscape && styles.landscapeMemberInfo]}>
             <View style={styles.nameContainer}>
-              <Text style={styles.memberName} numberOfLines={1}>
-                {item.name || "Unnamed Member"}
+              <Text 
+                style={styles.memberName} 
+                numberOfLines={1}
+              >
+                {fullName}
               </Text>
-              {isActiveUser && (
+              {isCurrentUser && (
                 <View style={styles.youBadge}>
                   <Text style={styles.youText}>You</Text>
                 </View>
               )}
+              {isNew && item.status === "Active" && (
+                <View style={styles.newBadge}>
+                  <Text style={styles.newText}>New</Text>
+                </View>
+              )}
+              {item.role && item.role !== "Member" && (
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleText}>{item.role}</Text>
+                </View>
+              )}
             </View>
-            <Text style={styles.memberEmail} numberOfLines={1}>
+            <Text 
+              style={styles.memberEmail} 
+              numberOfLines={1}
+            >
               {item.email || "No email"}
             </Text>
+            {item.accNo && (
+              <Text style={styles.accNoText}>Account #: {item.accNo}</Text>
+            )}
           </View>
 
           <Ionicons
@@ -165,17 +275,18 @@ export default function MembersScreen({ navigation }) {
         </View>
 
         <View style={styles.cardDetails}>
-          <View
-            style={[styles.detailRow, isLandscape && styles.landscapeDetailRow]}
-          >
+          <View style={[styles.detailRow, isLandscape && styles.landscapeDetailRow]}>
             <View style={styles.detailItem}>
               <Ionicons
                 name="home-outline"
                 size={responsiveSize(16)}
                 color="#64748B"
               />
-              <Text style={styles.detailText} numberOfLines={1}>
-                {item.unitNumber || item.unit || "Unit not specified"}
+              <Text 
+                style={styles.detailText} 
+                numberOfLines={1}
+              >
+                {item.address || "Address not specified"}
               </Text>
             </View>
 
@@ -185,11 +296,41 @@ export default function MembersScreen({ navigation }) {
                 size={responsiveSize(16)}
                 color="#64748B"
               />
-              <Text style={styles.detailText} numberOfLines={1}>
-                {item.phone ||
-                  item.contactNo ||
-                  item.contact ||
-                  "Not provided"}
+              <Text 
+                style={styles.detailText} 
+                numberOfLines={1}
+              >
+                {item.contact || item.phone || "Not provided"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.detailRow, isLandscape && styles.landscapeDetailRow]}>
+            <View style={styles.detailItem}>
+              <Ionicons
+                name="person-outline"
+                size={responsiveSize(16)}
+                color="#64748B"
+              />
+              <Text 
+                style={styles.detailText} 
+                numberOfLines={1}
+              >
+                {item.civilStatus || "Not specified"}
+              </Text>
+            </View>
+
+            <View style={styles.detailItem}>
+              <Ionicons
+                name="calendar-outline"
+                size={responsiveSize(16)}
+                color="#64748B"
+              />
+              <Text 
+                style={styles.detailText} 
+                numberOfLines={1}
+              >
+                {item.dob || "DOB not set"}
               </Text>
             </View>
           </View>
@@ -198,32 +339,42 @@ export default function MembersScreen({ navigation }) {
             <View
               style={[
                 styles.statusBadge,
-                isActiveUser ? styles.activeBadge : styles.inactiveBadge,
+                { backgroundColor: statusConfig.bgColor },
               ]}
             >
               <Ionicons
-                name={isActiveUser ? "checkmark-circle" : "time-outline"}
+                name={statusConfig.icon}
                 size={responsiveSize(14)}
-                color={isActiveUser ? "#059669" : "#DC2626"}
+                color={statusConfig.color}
               />
               <Text
                 style={[
                   styles.statusText,
-                  { color: isActiveUser ? "#059669" : "#DC2626" },
+                  { color: statusConfig.color },
                 ]}
               >
-                {isActiveUser ? "Active Member" : "Inactive"}
+                {statusConfig.label}
               </Text>
             </View>
 
-            <Text style={styles.joinDate} numberOfLines={1}>
-              {item.joinDate || item.dateJoined || "Member"}
-            </Text>
+            {item.accNo && (
+              <Text 
+                style={styles.joinDate} 
+                numberOfLines={1}
+              >
+                ID: {item.accNo}
+              </Text>
+            )}
           </View>
         </View>
       </View>
     );
   };
+
+  // Count members by status for the header - only non-deleted members
+  const activeMembersCount = members.filter(m => m.status === 'Active').length;
+  const newMembersCount = members.filter(m => isNewMember(m) && m.status === 'Active').length;
+  const totalMembersCount = members.length; // All members are non-deleted now
 
   return (
     <View style={styles.container}>
@@ -231,8 +382,7 @@ export default function MembersScreen({ navigation }) {
         <View>
           <Text style={styles.headerTitle}>Community Members</Text>
           <Text style={styles.headerSubtitle}>
-            {members.length}{" "}
-            {members.length === 1 ? "neighbor" : "neighbors"} in your community
+            {activeMembersCount} active • {newMembersCount} new • {totalMembersCount} total members
           </Text>
         </View>
         <View style={styles.headerDecoration} />
@@ -262,7 +412,6 @@ export default function MembersScreen({ navigation }) {
         }
       />
 
-      {/* Footer from AnnouncementScreen */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.footerButton}
@@ -359,7 +508,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#f1f5f9",
   },
-  activeUserCard: {
+  currentUserCard: {
     borderColor: "#00695C",
     borderWidth: 2,
     shadowColor: "#00695C",
@@ -405,12 +554,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "white",
   },
-  activeIndicator: {
-    backgroundColor: "#10B981",
-  },
-  inactiveIndicator: {
-    backgroundColor: "#EF4444",
-  },
   memberInfo: {
     flex: 1,
   },
@@ -421,6 +564,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 4,
+    flexWrap: "wrap",
   },
   memberName: {
     fontSize: 18,
@@ -433,15 +577,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 12,
+    marginRight: 6,
+  },
+  newBadge: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginRight: 6,
+  },
+  roleBadge: {
+    backgroundColor: "#7C3AED",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
   youText: {
     color: "white",
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  newText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  roleText: {
+    color: "white",
+    fontSize: 10,
     fontWeight: "600",
   },
   memberEmail: {
     fontSize: 14,
     color: "#64748b",
+    marginBottom: 2,
+  },
+  accNoText: {
+    fontSize: 12,
+    color: "#94a3b8",
+    fontStyle: "italic",
   },
   cardDetails: {
     borderTopWidth: 1,
@@ -451,10 +625,10 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 8,
   },
   landscapeDetailRow: {
-    marginBottom: 15,
+    marginBottom: 10,
   },
   detailItem: {
     flexDirection: "row",
@@ -471,6 +645,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 8,
   },
   statusBadge: {
     flexDirection: "row",
@@ -478,13 +653,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: "#f8fafc",
-  },
-  activeBadge: {
-    backgroundColor: "#f0fdf4",
-  },
-  inactiveBadge: {
-    backgroundColor: "#fef2f2",
   },
   statusText: {
     marginLeft: 4,
@@ -515,8 +683,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
   },
-
-  // Footer Styles from AnnouncementScreen
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",

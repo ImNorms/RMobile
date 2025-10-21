@@ -37,6 +37,14 @@ export default function ElectionsScreen() {
   const scrollViewRef = useRef(null);
   const sectionPositions = useRef({});
 
+  // 🔹 Define fixed order for positions
+  const POSITION_ORDER = [
+    "President",
+    "Vice President", 
+    "Treasurer",
+    "Secretary"
+  ];
+
   // 🔹 Helper to parse string date + time into Date object
   const parseDateTime = (dateStr, timeStr) => {
     try {
@@ -80,6 +88,28 @@ export default function ElectionsScreen() {
       setIsActive(false);
       setTimeMessage("⚠️ Voting has ended");
     }
+  };
+
+  // 🔹 Sort positions based on predefined order
+  const getSortedPositions = (electionsData) => {
+    return Object.keys(electionsData).sort((a, b) => {
+      const indexA = POSITION_ORDER.indexOf(a);
+      const indexB = POSITION_ORDER.indexOf(b);
+      
+      // If both positions are in the predefined order, sort by that order
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      
+      // If only position A is in predefined order, it comes first
+      if (indexA !== -1) return -1;
+      
+      // If only position B is in predefined order, it comes first  
+      if (indexB !== -1) return 1;
+      
+      // If neither position is in predefined order, sort alphabetically
+      return a.localeCompare(b);
+    });
   };
 
   // Fetch elections and candidates
@@ -169,10 +199,10 @@ export default function ElectionsScreen() {
         return;
       }
 
-      const allPositions = Object.keys(elections);
+      const sortedPositions = getSortedPositions(elections);
       const selectedPositions = Object.keys(selectedChoices);
 
-      const missing = allPositions.filter((pos) => !selectedPositions.includes(pos));
+      const missing = sortedPositions.filter((pos) => !selectedPositions.includes(pos));
 
       if (missing.length > 0) {
         setMissingPositions(missing);
@@ -232,6 +262,8 @@ export default function ElectionsScreen() {
     );
   }
 
+  const sortedPositions = getSortedPositions(elections);
+
   return (
     <View style={styles.container}>
       <ScrollView ref={scrollViewRef}>
@@ -252,7 +284,7 @@ export default function ElectionsScreen() {
           </View>
         )}
 
-        {Object.keys(elections).map((position) => (
+        {sortedPositions.map((position) => (
           <View
             key={position}
             style={styles.section}

@@ -24,6 +24,36 @@ export default function ElectionStatusScreen() {
   const [winners, setWinners] = useState({});
   const [countdown, setCountdown] = useState("");
 
+  // 🔹 Define fixed order for positions (same as ElectionsScreen)
+  const POSITION_ORDER = [
+    "President",
+    "Vice President", 
+    "Treasurer",
+    "Secretary"
+  ];
+
+  // 🔹 Sort positions based on predefined order
+  const getSortedPositions = (groupedData) => {
+    return Object.keys(groupedData).sort((a, b) => {
+      const indexA = POSITION_ORDER.indexOf(a);
+      const indexB = POSITION_ORDER.indexOf(b);
+      
+      // If both positions are in the predefined order, sort by that order
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      
+      // If only position A is in predefined order, it comes first
+      if (indexA !== -1) return -1;
+      
+      // If only position B is in predefined order, it comes first  
+      if (indexB !== -1) return 1;
+      
+      // If neither position is in predefined order, sort alphabetically
+      return a.localeCompare(b);
+    });
+  };
+
   // 🔹 helper to parse date + string times
   const parseDateTime = (dateStr, timeObj) => {
     if (!timeObj) return null;
@@ -176,6 +206,8 @@ export default function ElectionStatusScreen() {
     return () => clearInterval(timer);
   }, [endTime]);
 
+  const sortedPositions = getSortedPositions(groupedCandidates);
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -192,7 +224,7 @@ export default function ElectionStatusScreen() {
           )}
         </View>
 
-        {Object.keys(groupedCandidates).map((position) => (
+        {sortedPositions.map((position) => (
           <View key={position} style={styles.positionSection}>
             <View style={styles.positionHeader}>
               <Text style={styles.positionTitle}>HOA {position}</Text>
@@ -262,7 +294,7 @@ export default function ElectionStatusScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>🏆 Election Results</Text>
             <ScrollView style={{ maxHeight: 400 }}>
-              {Object.keys(winners).map((position) => (
+              {getSortedPositions(winners).map((position) => (
                 <View key={position} style={styles.modalSection}>
                   <Text style={styles.modalPosition}>{position}</Text>
                   {winners[position].map((winner) => (

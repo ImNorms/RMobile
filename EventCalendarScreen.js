@@ -30,7 +30,6 @@ export default function EventCalendarScreen({ navigation, route }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedDateEvents, setSelectedDateEvents] = useState([]);
   const [selectedDateStr, setSelectedDateStr] = useState("");
-  const [hasNewEvent, setHasNewEvent] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { width, height } = useWindowDimensions();
@@ -38,125 +37,92 @@ export default function EventCalendarScreen({ navigation, route }) {
   const isSmallScreen = width < 375;
   const isTablet = width > 768;
 
-  // --- Fetch events and check for new event in real time ---
+  // Fetch events without notification tracking
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      setEvents([]);
+      return;
+    }
 
     const eventsRef = collection(db, "events");
     const q = query(eventsRef, orderBy("start", "desc"));
 
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const data = snapshot.docs
-        .map((doc) => {
-          const item = { id: doc.id, ...doc.data() };
-          if (item.start && item.start.seconds) {
-            item.dateObj = new Date(item.start.seconds * 1000);
-          } else if (item.start) {
-            item.dateObj = new Date(item.start);
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        // Check if user still exists before processing data
+        if (!auth.currentUser) {
+          return;
+        }
+
+        const data = snapshot.docs
+          .map((doc) => {
+            const item = { id: doc.id, ...doc.data() };
+            if (item.start && item.start.seconds) {
+              item.dateObj = new Date(item.start.seconds * 1000);
+            } else if (item.start) {
+              item.dateObj = new Date(item.start);
+            }
+            return item;
+          })
+          .filter((e) => e.dateObj && !isNaN(e.dateObj.getTime()));
+
+        const today = new Date();
+        const upcoming = [];
+        const past = [];
+
+        data.forEach((event) => {
+          if (event.dateObj >= today) {
+            upcoming.push(event);
+          } else {
+            past.push(event);
           }
-          return item;
-        })
-        .filter((e) => e.dateObj && !isNaN(e.dateObj.getTime()));
+        });
 
-      const today = new Date();
-      const upcoming = [];
-      const past = [];
+        upcoming.sort((a, b) => a.dateObj - b.dateObj);
+        past.sort((a, b) => b.dateObj - a.dateObj);
 
-      data.forEach((event) => {
-        if (event.dateObj >= today) {
-          upcoming.push(event);
-        } else {
-          past.push(event);
-        }
-      });
+        const sortedData = [...upcoming, ...past];
+        setEvents(sortedData);
 
-      upcoming.sort((a, b) => a.dateObj - b.dateObj);
-      past.sort((a, b) => b.dateObj - a.dateObj);
-
-      const sortedData = [...upcoming, ...past];
-      setEvents(sortedData);
-
-      // --- Marked Dates for Calendar ---
-      let marks = {};
-      const todayYear = today.getFullYear();
-      const todayMonth = today.getMonth() + 1;
-      const todayDay = today.getDate();
-      const todayStr = `${todayYear}-${todayMonth.toString().padStart(2, "0")}-${todayDay
-        .toString()
-        .padStart(2, "0")}`;
-
-      sortedData.forEach((event) => {
-        const eventYear = event.dateObj.getFullYear();
-        const eventMonth = event.dateObj.getMonth() + 1;
-        const eventDay = event.dateObj.getDate();
-        const dateStr = `${eventYear}-${eventMonth
+        // Marked Dates for Calendar
+        let marks = {};
+        const todayYear = today.getFullYear();
+        const todayMonth = today.getMonth() + 1;
+        const todayDay = today.getDate();
+        const todayStr = `${todayYear}-${todayMonth.toString().padStart(2, "0")}-${todayDay
           .toString()
-          .padStart(2, "0")}-${eventDay.toString().padStart(2, "0")}`;
+          .padStart(2, "0")}`;
 
-        marks[dateStr] = {
-          marked: true,
-          dotColor: dateStr === todayStr ? "orange" : "#00695C",
-        };
-      });
-      setMarkedDates(marks);
+        sortedData.forEach((event) => {
+          const eventYear = event.dateObj.getFullYear();
+          const eventMonth = event.dateObj.getMonth() + 1;
+          const eventDay = event.dateObj.getDate();
+          const dateStr = `${eventYear}-${eventMonth
+            .toString()
+            .padStart(2, "0")}-${eventDay.toString().padStart(2, "0")}`;
 
-      // --- Real-time notification detection ---
-      if (snapshot.docs.length > 0) {
-        const latestDoc = snapshot.docs[0];
-        const latestData = latestDoc.data();
-
-        let latestTimestamp = 0;
-        if (latestData.start && latestData.start.seconds) {
-          latestTimestamp = latestData.start.seconds * 1000;
-        } else if (latestData.start) {
-          latestTimestamp = new Date(latestData.start).getTime();
-        }
-
-        const lastSeenStr = await AsyncStorage.getItem(
-          `lastSeenEvent_${auth.currentUser.uid}`
-        );
-        const lastSeen = lastSeenStr ? Number(lastSeenStr) : 0;
-
-        if (!lastSeen || latestTimestamp > lastSeen) {
-          setHasNewEvent(true);
+          marks[dateStr] = {
+            marked: true,
+            dotColor: dateStr === todayStr ? "orange" : "#00695C",
+          };
+        });
+        setMarkedDates(marks);
+      },
+      (error) => {
+        console.error("Error fetching events:", error);
+        if (error.code === 'failed-precondition') {
+          console.log("Missing Firestore index for events query");
+          Alert.alert("Database Error", "Please contact administrator to set up required database indexes.");
         }
       }
-    });
+    );
 
-    return () => unsubscribe();
-  }, []);
-
-  // --- Mark as seen when user opens this screen ---
-  useEffect(() => {
-    const markAsSeen = async () => {
-      if (!auth.currentUser || events.length === 0) return;
-
-      try {
-        const latestEvent = events[0];
-        let latestTimestamp = 0;
-
-        if (latestEvent.start && latestEvent.start.seconds) {
-          latestTimestamp = latestEvent.start.seconds * 1000;
-        } else if (latestEvent.start) {
-          latestTimestamp = new Date(latestEvent.start).getTime();
-        }
-
-        await AsyncStorage.setItem(
-          `lastSeenEvent_${auth.currentUser.uid}`,
-          String(latestTimestamp)
-        );
-
-        setHasNewEvent(false);
-      } catch (error) {
-        console.error("Error marking events as seen:", error);
-      }
+    return () => {
+      unsubscribe();
     };
+  }, [auth.currentUser]);
 
-    const unsubscribe = navigation.addListener("focus", markAsSeen);
-    return unsubscribe;
-  }, [navigation, events]);
-
-  // --- Set calendar to next upcoming event ---
+  // Set calendar to next upcoming event
   useEffect(() => {
     if (events.length > 0) {
       const today = new Date();
@@ -175,18 +141,33 @@ export default function EventCalendarScreen({ navigation, route }) {
     }
   }, [events]);
 
- const handleLogout = async () => {
-  try {
-    await signOut(auth);
-    navigation.reset({
-      index: 0,
-      routes: [{ name: "Login" }],
+  // Auth state listener for global cleanup
+  useEffect(() => {
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (!user) {
+        setEvents([]);
+        setMarkedDates({});
+        console.log("User logged out - reset event states");
+      }
     });
-  } catch (error) {
-    Alert.alert("Logout failed", error.message);
-  }
-};
 
+    return () => unsubscribeAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      setEvents([]);
+      setMarkedDates({});
+      
+      await signOut(auth);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout failed", error.message);
+    }
+  };
 
   const renderEvent = ({ item }) => {
     const eventDate = item.dateObj;
@@ -208,6 +189,11 @@ export default function EventCalendarScreen({ navigation, route }) {
           <Text style={styles.eventTime}>
             {eventDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
+          {item.description && (
+            <Text style={styles.eventDescription} numberOfLines={2}>
+              {item.description}
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -267,6 +253,15 @@ export default function EventCalendarScreen({ navigation, route }) {
             <Text style={styles.upcomingTitle}>Upcoming Events</Text>
           </>
         }
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons name="calendar-outline" size={64} color="#CBD5E1" />
+            <Text style={styles.emptyStateTitle}>No events scheduled</Text>
+            <Text style={styles.emptyStateText}>
+              Check back later for upcoming community events
+            </Text>
+          </View>
+        }
       />
 
       <View style={styles.footer}>
@@ -282,22 +277,7 @@ export default function EventCalendarScreen({ navigation, route }) {
           style={styles.footerButton}
           onPress={() => navigation.navigate("Home")}
         >
-          <View style={{ position: "relative" }}>
-            <Ionicons name="home" size={24} color="#fff" />
-            {hasNewEvent && (
-              <View
-                style={{
-                  position: "absolute",
-                  backgroundColor: "red",
-                  top: -2,
-                  right: -2,
-                  width: 10,
-                  height: 10,
-                  borderRadius: 5,
-                }}
-              />
-            )}
-          </View>
+          <Ionicons name="home" size={24} color="#fff" />
           <Text style={styles.footerText}>Home</Text>
         </TouchableOpacity>
 
@@ -325,6 +305,11 @@ export default function EventCalendarScreen({ navigation, route }) {
                     minute: "2-digit",
                   })}
                 </Text>
+                {event.description && (
+                  <Text style={styles.modalEventDescription}>
+                    {event.description}
+                  </Text>
+                )}
               </View>
             ))}
             <TouchableOpacity
@@ -348,6 +333,10 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomLeftRadius: 25,
     borderBottomRightRadius: 25,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
   },
   headerTitle: {
     color: "#fff",
@@ -368,6 +357,10 @@ const styles = StyleSheet.create({
     padding: 16,
     elevation: 4,
     marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
   },
   calendar: { borderRadius: 12 },
   eventCard: {
@@ -379,6 +372,10 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderLeftWidth: 4,
     borderLeftColor: "#00695C",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   dateBox: {
     width: 60,
@@ -392,8 +389,9 @@ const styles = StyleSheet.create({
   monthText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
   dayText: { color: "#fff", fontWeight: "bold", fontSize: 20 },
   eventInfo: { flex: 1, justifyContent: "center" },
-  eventTitle: { fontSize: 18, fontWeight: "bold", color: "#1e293b" },
-  eventTime: { fontSize: 16, color: "#64748b" },
+  eventTitle: { fontSize: 18, fontWeight: "bold", color: "#1e293b", marginBottom: 4 },
+  eventTime: { fontSize: 16, color: "#64748b", marginBottom: 4 },
+  eventDescription: { fontSize: 14, color: "#94a3b8", fontStyle: "italic" },
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -406,8 +404,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
   },
-  footerButton: { alignItems: "center", position: "relative" },
+  footerButton: { alignItems: "center" },
   footerText: { color: "#fff", fontSize: 12, marginTop: 4, textAlign: "center" },
   modalBackground: {
     flex: 1,
@@ -421,15 +423,17 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     borderRadius: 16,
     padding: 24,
+    maxHeight: "80%",
   },
-  modalTitle: { fontSize: 20, fontWeight: "bold", marginBottom: 16, textAlign: "center" },
+  modalTitle: { fontSize: 20, fontWeight: "bold", marginBottom: 16, textAlign: "center", color: "#1e293b" },
   modalEvent: {
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
   },
-  modalEventTitle: { fontSize: 16, fontWeight: "600", color: "#1e293b" },
-  modalEventTime: { fontSize: 14, color: "#64748b" },
+  modalEventTitle: { fontSize: 16, fontWeight: "600", color: "#1e293b", marginBottom: 4 },
+  modalEventTime: { fontSize: 14, color: "#64748b", marginBottom: 4 },
+  modalEventDescription: { fontSize: 14, color: "#94a3b8", fontStyle: "italic" },
   closeButton: {
     backgroundColor: "#00695C",
     padding: 14,
@@ -438,4 +442,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   closeButtonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#64748b",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: "#94a3b8",
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });

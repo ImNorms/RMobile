@@ -1,5 +1,5 @@
-// AnnouncementScreen.js
-import React, { useEffect, useState, useCallback } from "react";
+// AnnouncementScreen.js - Enhanced Likes Version
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -35,7 +35,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import { getAuth, signOut } from "firebase/auth";
+import { getAuth, signOut, onAuthStateChanged } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -58,7 +58,10 @@ export default function AnnouncementScreen({ navigation }) {
   const [editText, setEditText] = useState("");
   const [userProfiles, setUserProfiles] = useState({});
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [commentMenuVisible, setCommentMenuVisible] = useState(null); // Track which comment menu is open
+  const [commentMenuVisible, setCommentMenuVisible] = useState(null);
+  const [likesModalVisible, setLikesModalVisible] = useState(false);
+  const [selectedPostLikes, setSelectedPostLikes] = useState([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const auth = getAuth();
   const currentUser = auth.currentUser;
@@ -66,20 +69,86 @@ export default function AnnouncementScreen({ navigation }) {
 
   const adminUIDs = ["ADMIN_UID_1", "ADMIN_UID_2"];
 
-  const handleLogout = async () => {
-    try {
-      const auth = getAuth();
-      await signOut(auth);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Login" }],
-      });
-    } catch (error) {
-      Alert.alert("Logout failed", error.message);
-    }
-  };
+  const unsubscribeRefs = useRef({
+    posts: null,
+    comments: {},
+    reacts: {},
+    auth: null,
+    userProfile: null,
+    latestPost: null
+  });
 
-  // Keyboard listeners
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const cleanupAllListeners = useCallback(() => {
+    if (unsubscribeRefs.current.posts) {
+      unsubscribeRefs.current.posts();
+      unsubscribeRefs.current.posts = null;
+    }
+
+    Object.values(unsubscribeRefs.current.comments).forEach(unsubscribe => {
+      if (unsubscribe && typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    });
+    unsubscribeRefs.current.comments = {};
+
+    Object.values(unsubscribeRefs.current.reacts).forEach(unsubscribe => {
+      if (unsubscribe && typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    });
+    unsubscribeRefs.current.reacts = {};
+
+    if (unsubscribeRefs.current.userProfile) {
+      unsubscribeRefs.current.userProfile();
+      unsubscribeRefs.current.userProfile = null;
+    }
+
+    if (unsubscribeRefs.current.latestPost) {
+      unsubscribeRefs.current.latestPost();
+      unsubscribeRefs.current.latestPost = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!isMounted.current) return;
+
+      if (user) {
+        setIsAuthenticated(true);
+      } else {
+        setIsAuthenticated(false);
+        cleanupAllListeners();
+        setPosts([]);
+        setComments({});
+        setReacts({});
+        setCommentTexts({});
+        setCommentCounts({});
+        setSelectedPost(null);
+        setEditingComment(null);
+        setCommentMenuVisible(null);
+        setUserProfiles({});
+        setLoading(false);
+      }
+    });
+
+    unsubscribeRefs.current.auth = unsubscribe;
+
+    return () => {
+      if (unsubscribeRefs.current.auth) {
+        unsubscribeRefs.current.auth();
+      }
+    };
+  }, [cleanupAllListeners]);
+
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -100,9 +169,8 @@ export default function AnnouncementScreen({ navigation }) {
     };
   }, []);
 
-  // Update User Name in All Comments
   const updateUserNameInAllComments = async (userId, newName, newPhotoURL = null) => {
-    if (!userId || !newName) return;
+    if (!userId || !newName || !isAuthenticated) return;
     
     try {
       const postsQuery = query(collection(db, "posts"));
@@ -142,13 +210,12 @@ export default function AnnouncementScreen({ navigation }) {
         await updateUserNameInAllReacts(userId, newName, newPhotoURL);
       }
     } catch (error) {
-      console.error("Error updating username in comments:", error);
+      // Silent error handling
     }
   };
 
-  // Update User Name in All Reacts
   const updateUserNameInAllReacts = async (userId, newName, newPhotoURL = null) => {
-    if (!userId || !newName) return;
+    if (!userId || !newName || !isAuthenticated) return;
     
     try {
       const postsQuery = query(collection(db, "posts"));
@@ -185,13 +252,12 @@ export default function AnnouncementScreen({ navigation }) {
         await batch.commit();
       }
     } catch (error) {
-      console.error("Error updating username in reacts:", error);
+      // Silent error handling
     }
   };
 
-  // Get user profile data
   const getUserProfileData = async (userId) => {
-    if (!userId) return { name: "User", photoURL: null };
+    if (!userId || !isAuthenticated) return { name: "User", photoURL: null };
     
     try {
       if (userProfiles[userId]) {
@@ -224,18 +290,18 @@ export default function AnnouncementScreen({ navigation }) {
       if (error.code === 'permission-denied' || error.code === 'missing-or-insufficient-permissions') {
         return { name: "User", photoURL: null };
       }
-      console.error("Error fetching user profile:", error);
       return { name: "User", photoURL: null };
     }
   };
 
-  // Listen for user profile changes
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !isAuthenticated) return;
 
     const userRef = doc(db, "members", currentUser.uid);
     
     const unsubscribe = onSnapshot(userRef, async (userSnap) => {
+      if (!isMounted.current || !isAuthenticated) return;
+
       if (userSnap.exists()) {
         const userData = userSnap.data();
         const newName = userData.name || userData.displayName;
@@ -256,15 +322,19 @@ export default function AnnouncementScreen({ navigation }) {
         }));
       }
     }, (error) => {
-      if (error.code === 'permission-denied') {
-        // Handle permission error silently
-      }
+      // Silent error handling for permission errors
     });
 
-    return () => unsubscribe();
-  }, [currentUser]);
+    unsubscribeRefs.current.userProfile = unsubscribe;
 
-  // Notification Logic
+    return () => {
+      if (unsubscribeRefs.current.userProfile) {
+        unsubscribeRefs.current.userProfile();
+        unsubscribeRefs.current.userProfile = null;
+      }
+    };
+  }, [currentUser, isAuthenticated]);
+
   const getLastSeenAnnouncement = async (uid) => {
     if (!uid) return null;
     return await AsyncStorage.getItem(`lastSeenAnnouncement_${uid}`);
@@ -276,7 +346,7 @@ export default function AnnouncementScreen({ navigation }) {
   };
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !isAuthenticated) return;
 
     const latestPostQuery = query(
       collection(db, "posts"),
@@ -285,6 +355,8 @@ export default function AnnouncementScreen({ navigation }) {
     );
 
     const unsubscribe = onSnapshot(latestPostQuery, async (snapshot) => {
+      if (!isMounted.current || !isAuthenticated) return;
+
       if (!snapshot.empty) {
         const latestPost = snapshot.docs[0].data();
         const latestTimestamp = latestPost.createdAt?.seconds || 0;
@@ -303,23 +375,30 @@ export default function AnnouncementScreen({ navigation }) {
       }
     });
 
-    return () => unsubscribe();
-  }, [currentUser]);
+    unsubscribeRefs.current.latestPost = unsubscribe;
+
+    return () => {
+      if (unsubscribeRefs.current.latestPost) {
+        unsubscribeRefs.current.latestPost();
+        unsubscribeRefs.current.latestPost = null;
+      }
+    };
+  }, [currentUser, isAuthenticated]);
 
   useFocusEffect(
     useCallback(() => {
-      if (posts.length > 0 && currentUser?.uid) {
+      if (posts.length > 0 && currentUser?.uid && isAuthenticated) {
         const latest = posts[0].createdAt?.seconds;
         if (latest) {
           setLastSeenAnnouncement(currentUser.uid, latest);
           navigation.setParams({ hasNewAnnouncement: false });
         }
       }
-    }, [posts, currentUser])
+    }, [posts, currentUser, isAuthenticated])
   );
 
   const fetchUserProfile = async (userId) => {
-    if (!userId || userProfiles[userId]) return;
+    if (!userId || userProfiles[userId] || !isAuthenticated) return;
     
     try {
       if (userId === currentUser?.uid) {
@@ -343,12 +422,19 @@ export default function AnnouncementScreen({ navigation }) {
   };
 
   const getCommentCount = async (postId) => {
+    if (!isAuthenticated || !isMounted.current) {
+      return 0;
+    }
+    
     try {
       const commentsRef = collection(db, "posts", postId, "comments");
       const snapshot = await getCountFromServer(commentsRef);
       return snapshot.data().count;
     } catch (error) {
-      console.error("Error getting comment count:", error);
+      if (error.code === 'permission-denied' || error.code === 'missing-or-insufficient-permissions') {
+        const commentsCount = comments[postId]?.length || 0;
+        return commentsCount;
+      }
       return 0;
     }
   };
@@ -359,10 +445,56 @@ export default function AnnouncementScreen({ navigation }) {
     );
   };
 
+  // ENHANCED: Optimistic UI update for likes
   const toggleLike = async (postId) => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !isAuthenticated) {
+      Alert.alert("Authentication Required", "Please log in to like posts");
+      return;
+    }
 
     try {
+      const hasLiked = hasUserReacted(postId);
+      const currentPost = posts.find((p) => p.id === postId);
+      const currentReactsCount = currentPost?.reactsCount || 0;
+
+      // Optimistic update - update UI immediately
+      setPosts((prevPosts) =>
+        prevPosts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                reactsCount: hasLiked
+                  ? Math.max(0, currentReactsCount - 1)
+                  : currentReactsCount + 1,
+              }
+            : post
+        )
+      );
+
+      // Optimistic update for reacts state
+      const userProfile = await getUserProfileData(currentUser.uid);
+      
+      if (hasLiked) {
+        setReacts((prev) => ({
+          ...prev,
+          [postId]: (prev[postId] || []).filter((r) => r.userId !== currentUser.uid),
+        }));
+      } else {
+        const tempReact = {
+          id: `temp-${Date.now()}`,
+          userId: currentUser.uid,
+          authorName: userProfile.name || currentUser.displayName || "User",
+          photoURL: userProfile.photoURL || currentUser.photoURL || null,
+          createdAt: { seconds: Date.now() / 1000 },
+          type: "like",
+        };
+        setReacts((prev) => ({
+          ...prev,
+          [postId]: [...(prev[postId] || []), tempReact],
+        }));
+      }
+
+      // Perform the actual database operation
       const reactsRef = collection(db, "posts", postId, "reacts");
       const userReactQuery = query(
         reactsRef,
@@ -370,11 +502,8 @@ export default function AnnouncementScreen({ navigation }) {
       );
 
       const snapshot = await getDocs(userReactQuery);
-
       const postRef = doc(db, "posts", postId);
-      const currentPost = posts.find((p) => p.id === postId);
 
-      const userProfile = await getUserProfileData(currentUser.uid);
       const userPhotoURL = userProfile.photoURL || currentUser.photoURL || null;
       const userName = userProfile.name || currentUser.displayName || "User";
 
@@ -387,23 +516,37 @@ export default function AnnouncementScreen({ navigation }) {
           type: "like",
         });
         await updateDoc(postRef, {
-          reactsCount: (currentPost?.reactsCount || 0) + 1,
+          reactsCount: currentReactsCount + 1,
         });
       } else {
         const reactDoc = snapshot.docs[0];
         await deleteDoc(doc(db, "posts", postId, "reacts", reactDoc.id));
         await updateDoc(postRef, {
-          reactsCount: Math.max(0, (currentPost?.reactsCount || 0) - 1),
+          reactsCount: Math.max(0, currentReactsCount - 1),
         });
       }
     } catch (error) {
-      console.error("Error toggling like:", error);
+      // Revert optimistic update on error
+      const currentPost = posts.find((p) => p.id === postId);
+      if (currentPost && isMounted.current) {
+        setPosts((prevPosts) =>
+          prevPosts.map((post) =>
+            post.id === postId
+              ? { ...post, reactsCount: currentPost.reactsCount }
+              : post
+          )
+        );
+      }
+      Alert.alert("Error", "Failed to update like. Please try again.");
     }
   };
 
   const addComment = async (postId, currentCommentsCount) => {
     const text = commentTexts[postId];
-    if (!text?.trim() || !currentUser?.uid) return;
+    if (!text?.trim() || !currentUser?.uid || !isAuthenticated) {
+      Alert.alert("Authentication Required", "Please log in to comment");
+      return;
+    }
 
     try {
       const commentsRef = collection(db, "posts", postId, "comments");
@@ -429,31 +572,53 @@ export default function AnnouncementScreen({ navigation }) {
 
       setCommentTexts((prev) => ({ ...prev, [postId]: "" }));
     } catch (error) {
-      console.error("Error adding comment:", error);
+      // Silent error handling
     }
   };
 
   const deleteComment = async (postId, commentId, currentCommentsCount) => {
-    try {
-      await deleteDoc(doc(db, "posts", postId, "comments", commentId));
-      const postRef = doc(db, "posts", postId);
-      await updateDoc(postRef, {
-        commentsCount: Math.max(0, (currentCommentsCount || 1) - 1),
-      });
-      setCommentMenuVisible(null); // Close menu after deletion
-    } catch (error) {
-      console.error("Error deleting comment:", error);
+    if (!isAuthenticated) {
+      Alert.alert("Authentication Required", "Please log in to delete comments");
+      return;
     }
+
+    Alert.alert(
+      "Delete Comment",
+      "Are you sure you want to delete this comment?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+          onPress: () => setCommentMenuVisible(null)
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, "posts", postId, "comments", commentId));
+              const postRef = doc(db, "posts", postId);
+              await updateDoc(postRef, {
+                commentsCount: Math.max(0, (currentCommentsCount || 1) - 1),
+              });
+              setCommentMenuVisible(null);
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete comment");
+            }
+          }
+        }
+      ]
+    );
   };
 
   const startEditComment = (comment) => {
     setEditingComment(comment);
     setEditText(comment.text);
-    setCommentMenuVisible(null); // Close menu when editing starts
+    setCommentMenuVisible(null);
   };
 
   const saveEditedComment = async (postId, commentId) => {
-    if (!editText.trim()) return;
+    if (!editText.trim() || !isAuthenticated) return;
 
     try {
       const commentRef = doc(db, "posts", postId, "comments", commentId);
@@ -461,7 +626,7 @@ export default function AnnouncementScreen({ navigation }) {
       setEditingComment(null);
       setEditText("");
     } catch (error) {
-      console.error("Error editing comment:", error);
+      Alert.alert("Error", "Failed to update comment");
     }
   };
 
@@ -497,6 +662,66 @@ export default function AnnouncementScreen({ navigation }) {
     return Math.min(Math.max(calculatedHeight, 150), 400);
   };
 
+  // ENHANCED: Format time ago
+  const formatTimeAgo = (date) => {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    let interval = seconds / 31536000;
+    if (interval > 1) return Math.floor(interval) + "y ago";
+    
+    interval = seconds / 2592000;
+    if (interval > 1) return Math.floor(interval) + "mo ago";
+    
+    interval = seconds / 86400;
+    if (interval > 1) return Math.floor(interval) + "d ago";
+    
+    interval = seconds / 3600;
+    if (interval > 1) return Math.floor(interval) + "h ago";
+    
+    interval = seconds / 60;
+    if (interval > 1) return Math.floor(interval) + "m ago";
+    
+    return "Just now";
+  };
+
+  const showLikesModal = (postId) => {
+    const postReacts = reacts[postId] || [];
+    setSelectedPostLikes(postReacts);
+    setLikesModalVisible(true);
+  };
+
+  const closeLikesModal = () => {
+    setLikesModalVisible(false);
+    setSelectedPostLikes([]);
+  };
+
+  const handleLogout = async () => {
+    try {
+      cleanupAllListeners();
+      
+      setPosts([]);
+      setComments({});
+      setReacts({});
+      setCommentTexts({});
+      setCommentCounts({});
+      setSelectedPost(null);
+      setEditingComment(null);
+      setCommentMenuVisible(null);
+      setUserProfiles({});
+      setLoading(false);
+      
+      const auth = getAuth();
+      await signOut(auth);
+      
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (error) {
+      Alert.alert("Logout failed", error.message);
+    }
+  };
+
   const renderUserAvatar = (userId, photoURL = null, size = 32) => {
     const userProfile = userProfiles[userId];
     const avatarPhotoURL = photoURL || userProfile?.photoURL;
@@ -524,7 +749,6 @@ export default function AnnouncementScreen({ navigation }) {
     );
   };
 
-  // Render Post Content (reusable for both main feed and modal)
   const renderPostContent = (item, isInModal = false) => (
     <View style={[styles.postContainer, isInModal && styles.modalPostContainer]}>
       <View style={styles.postHeader}>
@@ -547,8 +771,7 @@ export default function AnnouncementScreen({ navigation }) {
       </View>
 
       <View style={styles.postContent}>
-        <Text style={styles.postTitle}>{item.title}</Text>
-        <Text style={styles.postDescription}>{item.description}</Text>
+        <Text style={styles.postContentText}>{item.title}</Text>
 
         {item.imageUrl &&
         !imageErrors[item.id] &&
@@ -603,13 +826,34 @@ export default function AnnouncementScreen({ navigation }) {
         )}
       </View>
 
+      {/* ENHANCED: Post stats with better visuals */}
       <View style={styles.postStats}>
-        <Text style={styles.statText}>{item.reactsCount || 0} likes</Text>
+        <TouchableOpacity 
+          onPress={() => showLikesModal(item.id)}
+          style={styles.statButton}
+          disabled={!item.reactsCount || item.reactsCount === 0}
+        >
+          <View style={styles.reactIconsContainer}>
+            {item.reactsCount > 0 && (
+              <View style={styles.reactIcon}>
+                <Ionicons name="heart" size={16} color="#e74c3c" />
+              </View>
+            )}
+          </View>
+          <Text style={[styles.statText, styles.likesCount]}>
+            {item.reactsCount > 0 ? (
+              `${item.reactsCount} ${item.reactsCount === 1 ? 'like' : 'likes'}`
+            ) : (
+              'Be the first to like'
+            )}
+          </Text>
+        </TouchableOpacity>
         <Text style={styles.statText}>
-          {commentCounts[item.id] || 0} comments
+          {commentCounts[item.id] || 0} {(commentCounts[item.id] || 0) === 1 ? 'comment' : 'comments'}
         </Text>
       </View>
 
+      {/* ENHANCED: Action buttons with better text */}
       {!isInModal && (
         <View style={styles.postActions}>
           <TouchableOpacity
@@ -618,27 +862,33 @@ export default function AnnouncementScreen({ navigation }) {
               hasUserReacted(item.id) && styles.activeActionButton,
             ]}
             onPress={() => toggleLike(item.id)}
+            activeOpacity={0.7}
           >
-            <Ionicons
-              name={hasUserReacted(item.id) ? "heart" : "heart-outline"}
-              size={20}
-              color={hasUserReacted(item.id) ? "#e74c3c" : "#555"}
-            />
+            <View style={styles.actionIconContainer}>
+              <Ionicons
+                name={hasUserReacted(item.id) ? "heart" : "heart-outline"}
+                size={22}
+                color={hasUserReacted(item.id) ? "#e74c3c" : "#555"}
+              />
+            </View>
             <Text
               style={[
                 styles.actionText,
                 hasUserReacted(item.id) && styles.activeActionText,
               ]}
             >
-              Like
+              {hasUserReacted(item.id) ? "Liked" : "Like"}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.actionButton}
             onPress={() => setSelectedPost(item)}
+            activeOpacity={0.7}
           >
-            <Ionicons name="chatbubble-outline" size={20} color="#555" />
+            <View style={styles.actionIconContainer}>
+              <Ionicons name="chatbubble-outline" size={20} color="#555" />
+            </View>
             <Text style={styles.actionText}>Comment</Text>
           </TouchableOpacity>
         </View>
@@ -647,6 +897,12 @@ export default function AnnouncementScreen({ navigation }) {
   );
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setPosts([]);
+      setLoading(false);
+      return;
+    }
+
     const postsQuery = query(
       collection(db, "posts"),
       orderBy("createdAt", "desc")
@@ -655,14 +911,17 @@ export default function AnnouncementScreen({ navigation }) {
     const unsubscribePosts = onSnapshot(
       postsQuery,
       async (snapshot) => {
+        if (!isMounted.current || !isAuthenticated) {
+          return;
+        }
+
         const postsData = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           const imageUrl = data.mediaUrl || data.imageUrl || "";
           return {
             id: docSnap.id,
             ...data,
-            title: data.content || "No title",
-            description: data.content || "No description",
+            title: data.content || "No content available",
             author: { name: data.authorName || "HOA Member" },
             createdAt: data.createdAt,
             imageUrl: imageUrl,
@@ -677,75 +936,154 @@ export default function AnnouncementScreen({ navigation }) {
 
         const counts = {};
         for (const post of postsData) {
-          counts[post.id] = await getCommentCount(post.id);
+          if (!isMounted.current || !isAuthenticated) {
+            break;
+          }
+          try {
+            counts[post.id] = await getCommentCount(post.id);
+          } catch (error) {
+            counts[post.id] = 0;
+          }
         }
-        setCommentCounts(counts);
+        
+        if (isMounted.current && isAuthenticated) {
+          setCommentCounts(counts);
+        }
+
+        Object.values(unsubscribeRefs.current.comments).forEach(unsubscribe => {
+          if (unsubscribe && typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
+        });
+        Object.values(unsubscribeRefs.current.reacts).forEach(unsubscribe => {
+          if (unsubscribe && typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
+        });
+        unsubscribeRefs.current.comments = {};
+        unsubscribeRefs.current.reacts = {};
 
         postsData.forEach((post) => {
+          if (!isMounted.current || !isAuthenticated) return;
+
           const commentsQuery = query(
             collection(db, "posts", post.id, "comments"),
             orderBy("createdAt", "asc")
           );
 
-          onSnapshot(commentsQuery, (commentsSnapshot) => {
-            const postComments = commentsSnapshot.docs.map((commentDoc) => {
-              const commentData = commentDoc.data();
+          const unsubscribeComments = onSnapshot(
+            commentsQuery,
+            (commentsSnapshot) => {
+              if (!isMounted.current || !isAuthenticated) return;
               
-              if (commentData.userId === currentUser?.uid) {
-                fetchUserProfile(commentData.userId);
-              }
-              
-              return {
-                id: commentDoc.id,
-                text: commentData.text || commentData.content || "",
-                user:
-                  commentData.authorName ||
-                  commentData.user ||
-                  commentData.userName ||
-                  "Anonymous",
-                isAdmin: commentData.isAdmin || false,
-                createdAt: commentData.createdAt,
-                userId: commentData.userId,
-                photoURL: commentData.photoURL || null,
-                ...commentData,
-              };
-            });
-            setComments((prev) => ({ ...prev, [post.id]: postComments }));
-            setCommentCounts((prev) => ({
-              ...prev,
-              [post.id]: commentsSnapshot.size,
-            }));
-          });
+              const postComments = commentsSnapshot.docs.map((commentDoc) => {
+                const commentData = commentDoc.data();
+                
+                if (commentData.userId === currentUser?.uid) {
+                  fetchUserProfile(commentData.userId);
+                }
+                
+                return {
+                  id: commentDoc.id,
+                  text: commentData.text || commentData.content || "",
+                  user:
+                    commentData.authorName ||
+                    commentData.user ||
+                    commentData.userName ||
+                    "Anonymous",
+                  isAdmin: commentData.isAdmin || false,
+                  createdAt: commentData.createdAt,
+                  userId: commentData.userId,
+                  photoURL: commentData.photoURL || null,
+                  ...commentData,
+                };
+              });
+              setComments((prev) => ({ ...prev, [post.id]: postComments }));
+              setCommentCounts((prev) => ({
+                ...prev,
+                [post.id]: commentsSnapshot.size,
+              }));
+            },
+            (error) => {
+              // Silent error handling
+            }
+          );
 
           const reactsQuery = query(collection(db, "posts", post.id, "reacts"));
-          onSnapshot(reactsQuery, (reactsSnapshot) => {
-            const postReacts = reactsSnapshot.docs.map((reactDoc) => {
-              const reactData = reactDoc.data();
+          const unsubscribeReacts = onSnapshot(
+            reactsQuery,
+            (reactsSnapshot) => {
+              if (!isMounted.current || !isAuthenticated) return;
               
-              if (reactData.userId === currentUser?.uid) {
-                fetchUserProfile(reactData.userId);
-              }
-              
-              return {
-                id: reactDoc.id,
-                ...reactData,
-                photoURL: reactData.photoURL || null,
-              };
-            });
-            setReacts((prev) => ({ ...prev, [post.id]: postReacts }));
-          });
+              const postReacts = reactsSnapshot.docs.map((reactDoc) => {
+                const reactData = reactDoc.data();
+                
+                if (reactData.userId === currentUser?.uid) {
+                  fetchUserProfile(reactData.userId);
+                }
+                
+                return {
+                  id: reactDoc.id,
+                  ...reactData,
+                  photoURL: reactData.photoURL || null,
+                };
+              });
+              setReacts((prev) => ({ ...prev, [post.id]: postReacts }));
+            },
+            (error) => {
+              // Silent error handling
+            }
+          );
+
+          unsubscribeRefs.current.comments[post.id] = unsubscribeComments;
+          unsubscribeRefs.current.reacts[post.id] = unsubscribeReacts;
         });
       },
       (error) => {
-        console.error("Error fetching posts:", error);
-        setLoading(false);
+        if (isMounted.current && isAuthenticated) {
+          setLoading(false);
+        }
       }
     );
 
-    return () => unsubscribePosts();
-  }, []);
+    unsubscribeRefs.current.posts = unsubscribePosts;
+
+    return () => {
+      if (unsubscribeRefs.current.posts) {
+        unsubscribeRefs.current.posts();
+        unsubscribeRefs.current.posts = null;
+      }
+    };
+  }, [isAuthenticated]);
 
   const renderItem = ({ item }) => renderPostContent(item, false);
+
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.center}>
+          <Ionicons name="log-in-outline" size={64} color="#ccc" />
+          <Text style={styles.empty}>Please log in to view announcements</Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => navigation.navigate("Login")}
+          >
+            <Text style={styles.loginButtonText}>Go to Login</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.footerButton}
+            onPress={() => navigation.navigate("Login")}
+          >
+            <Ionicons name="log-in" size={22} color="#fff" />
+            <Text style={styles.footerText}>Login</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -774,21 +1112,20 @@ export default function AnnouncementScreen({ navigation }) {
         animationType="slide"
         onRequestClose={() => {
           setSelectedPost(null);
-          setCommentMenuVisible(null); // Close any open menus when modal closes
-          cancelEditComment(); // Cancel any active editing
+          setCommentMenuVisible(null);
+          cancelEditComment();
         }}
         presentationStyle="pageSheet"
       >
         <KeyboardAvoidingView 
           style={styles.modalContainer}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
-          {/* Modal Header */}
           <View style={styles.modalHeader}>
             <View style={styles.modalHeaderLeft}>
               <Text style={styles.modalTitle}>Post & Comments</Text>
-              <Text style={styles.commentCount}>
+              <Text style={styles.commentCountHeader}>
                 {commentCounts[selectedPost?.id] || 0} comments
               </Text>
             </View>
@@ -800,24 +1137,21 @@ export default function AnnouncementScreen({ navigation }) {
                 cancelEditComment();
               }}
             >
-              <Ionicons name="close" size={24} color="#333" />
+              <Ionicons name="close" size={24} color="#1a1a1a" />
             </TouchableOpacity>
           </View>
 
-          {/* Scrollable Content - Post + Comments */}
           <ScrollView 
             style={styles.modalContent}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[
               styles.modalContentContainer,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + (editingComment ? 200 : 120) : 120 }
+              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + (editingComment ? 220 : 100) : (editingComment ? 220 : 100) }
             ]}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Post Content */}
             {selectedPost && renderPostContent(selectedPost, true)}
 
-            {/* Comments Section */}
             <View style={styles.commentsSection}>
               <Text style={styles.commentsTitle}>Comments</Text>
               
@@ -830,7 +1164,7 @@ export default function AnnouncementScreen({ navigation }) {
                       comment.isAdmin && styles.adminCommentItem,
                     ]}
                   >
-                    {renderUserAvatar(comment.userId, comment.photoURL, 36)}
+                    {renderUserAvatar(comment.userId, comment.photoURL, 40)}
                     
                     <View style={styles.commentContent}>
                       <View style={styles.commentHeader}>
@@ -849,67 +1183,80 @@ export default function AnnouncementScreen({ navigation }) {
                             </View>
                           )}
                         </View>
-                        <View style={styles.commentHeaderRight}>
-                          <Text style={styles.commentTime}>
-                            {comment.createdAt
-                              ? new Date(
-                                  comment.createdAt.seconds * 1000
-                                ).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })
-                              : ""}
-                          </Text>
-                          
-                          {/* Three dots menu for comment actions */}
-                          {(comment.userId === currentUser?.uid ||
-                            adminUIDs.includes(currentUser?.uid)) &&
-                            !editingComment && (
-                            <View style={styles.commentMenuContainer}>
-                              <TouchableOpacity
-                                style={styles.commentMenuButton}
-                                onPress={() => toggleCommentMenu(comment.id)}
-                              >
-                                <Ionicons name="ellipsis-horizontal" size={16} color="#666" />
-                              </TouchableOpacity>
-                              
-                              {/* Comment Actions Menu */}
-                              {commentMenuVisible === comment.id && (
-                                <View style={styles.commentMenu}>
-                                  <TouchableOpacity
-                                    style={styles.commentMenuItem}
-                                    onPress={() => startEditComment(comment)}
-                                  >
-                                    <Ionicons name="create-outline" size={16} color="#666" />
-                                    <Text style={styles.commentMenuItemText}>Edit</Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    style={[styles.commentMenuItem, styles.deleteMenuItem]}
-                                    onPress={() =>
-                                      deleteComment(
-                                        selectedPost.id,
-                                        comment.id,
-                                        selectedPost.commentsCount
-                                      )
-                                    }
-                                  >
-                                    <Ionicons name="trash-outline" size={16} color="#e74c3c" />
-                                    <Text style={[styles.commentMenuItemText, styles.deleteMenuItemText]}>
-                                      Delete
-                                    </Text>
-                                  </TouchableOpacity>
-                                </View>
-                              )}
-                            </View>
-                          )}
-                        </View>
+                        
+                        {(comment.userId === currentUser?.uid ||
+                          adminUIDs.includes(currentUser?.uid)) &&
+                          !editingComment && (
+                          <TouchableOpacity
+                            style={styles.commentMenuButton}
+                            onPress={() => toggleCommentMenu(comment.id)}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          >
+                            <Ionicons name="ellipsis-horizontal" size={18} color="#65676b" />
+                          </TouchableOpacity>
+                        )}
                       </View>
 
-                      {editingComment?.id === comment.id ? (
-                        // Empty view since edit interface is now above keyboard
-                        <Text style={styles.commentText}>{comment.text}</Text>
-                      ) : (
-                        <Text style={styles.commentText}>{comment.text}</Text>
+                      <Text style={styles.commentText}>{comment.text}</Text>
+                      
+                      <Text style={styles.commentTime}>
+                        {comment.createdAt
+                          ? new Date(
+                              comment.createdAt.seconds * 1000
+                            ).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : ""}
+                      </Text>
+
+                      {commentMenuVisible === comment.id && (
+                        <Modal
+                          transparent
+                          visible={true}
+                          animationType="fade"
+                          onRequestClose={() => setCommentMenuVisible(null)}
+                        >
+                          <TouchableOpacity 
+                            style={styles.commentMenuOverlay}
+                            activeOpacity={1}
+                            onPress={() => setCommentMenuVisible(null)}
+                          >
+                            <View style={styles.commentMenuModal}>
+                              <View style={styles.commentMenuContent}>
+                                <TouchableOpacity
+                                  style={styles.commentMenuItem}
+                                  onPress={() => startEditComment(comment)}
+                                >
+                                  <Ionicons name="create-outline" size={20} color="#1a1a1a" />
+                                  <Text style={styles.commentMenuItemText}>Edit Comment</Text>
+                                </TouchableOpacity>
+                                <View style={styles.commentMenuDivider} />
+                                <TouchableOpacity
+                                  style={[styles.commentMenuItem, styles.deleteMenuItem]}
+                                  onPress={() =>
+                                    deleteComment(
+                                      selectedPost.id,
+                                      comment.id,
+                                      selectedPost.commentsCount
+                                    )
+                                  }
+                                >
+                                  <Ionicons name="trash-outline" size={20} color="#e74c3c" />
+                                  <Text style={[styles.commentMenuItemText, styles.deleteMenuItemText]}>
+                                    Delete Comment
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                              <TouchableOpacity
+                                style={styles.commentMenuCancel}
+                                onPress={() => setCommentMenuVisible(null)}
+                              >
+                                <Text style={styles.commentMenuCancelText}>Cancel</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </TouchableOpacity>
+                        </Modal>
                       )}
                     </View>
                   </View>
@@ -926,7 +1273,6 @@ export default function AnnouncementScreen({ navigation }) {
             </View>
           </ScrollView>
 
-          {/* Edit Comment Interface - Positioned above keyboard */}
           {editingComment && (
             <View style={[
               styles.editCommentContainer,
@@ -971,7 +1317,6 @@ export default function AnnouncementScreen({ navigation }) {
             </View>
           )}
 
-          {/* Comment Input - Positioned above keyboard (only show when not editing) */}
           {currentUser && !editingComment && (
             <View style={[
               styles.commentInputContainer,
@@ -1015,6 +1360,75 @@ export default function AnnouncementScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ENHANCED: Likes Modal */}
+      <Modal
+        visible={likesModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeLikesModal}
+      >
+        <TouchableOpacity 
+          style={styles.likesModalContainer}
+          activeOpacity={1}
+          onPress={closeLikesModal}
+        >
+          <TouchableOpacity 
+            activeOpacity={1} 
+            style={styles.likesModalContent}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.likesModalHeader}>
+              <View style={styles.likesModalHeaderLeft}>
+                <Text style={styles.likesModalTitle}>
+                  Reactions
+                </Text>
+                <Text style={styles.likesModalSubtitle}>
+                  {selectedPostLikes.length} {selectedPostLikes.length === 1 ? 'person' : 'people'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.likesModalCloseButton}
+                onPress={closeLikesModal}
+              >
+                <Ionicons name="close" size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+            
+            <FlatList
+              data={selectedPostLikes}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={styles.likeItem}>
+                  {renderUserAvatar(item.userId, item.photoURL, 44)}
+                  <View style={styles.likeUserInfo}>
+                    <Text style={styles.likeUserName}>{item.authorName}</Text>
+                    <Text style={styles.likeTime}>
+                      {item.createdAt
+                        ? formatTimeAgo(new Date(item.createdAt.seconds * 1000))
+                        : ""}
+                    </Text>
+                  </View>
+                  <Ionicons name="heart" size={20} color="#e74c3c" />
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.noLikes}>
+                  <View style={styles.noLikesIconContainer}>
+                    <Ionicons name="heart-outline" size={56} color="#e0e0e0" />
+                  </View>
+                  <Text style={styles.noLikesText}>No reactions yet</Text>
+                  <Text style={styles.noLikesSubtext}>
+                    Be the first to react to this post
+                  </Text>
+                </View>
+              }
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.likesListContainer}
+            />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
@@ -1043,6 +1457,10 @@ export default function AnnouncementScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#f8f9fa"
+  },
   wrapper: { 
     flex: 1, 
     backgroundColor: "#f8f9fa" 
@@ -1051,6 +1469,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 40,
   },
   loadingText: {
     marginTop: 10,
@@ -1062,6 +1481,18 @@ const styles = StyleSheet.create({
     marginTop: 50,
     fontSize: 16,
     color: "#555",
+  },
+  loginButton: {
+    marginTop: 20,
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  loginButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
   },
   postContainer: {
     backgroundColor: "white",
@@ -1076,11 +1507,10 @@ const styles = StyleSheet.create({
   },
   modalPostContainer: {
     margin: 0,
-    marginBottom: 20,
-    padding: 16,
+    marginBottom: 8,
+    padding: 20,
     borderRadius: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0,
     elevation: 0,
@@ -1120,12 +1550,7 @@ const styles = StyleSheet.create({
   postContent: {
     marginBottom: 10,
   },
-  postTitle: {
-    fontWeight: "bold",
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  postDescription: {
+  postContentText: {
     fontSize: 14,
     color: "#555",
     lineHeight: 20,
@@ -1179,9 +1604,36 @@ const styles = StyleSheet.create({
     borderColor: "#eee",
     marginVertical: 8,
   },
+  statButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reactIconsContainer: {
+    flexDirection: 'row',
+    marginRight: 6,
+  },
+  reactIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
   statText: {
     fontSize: 13,
     color: "#666",
+  },
+  likesCount: {
+    color: "#007AFF",
+    fontWeight: '600',
   },
   postActions: {
     flexDirection: "row",
@@ -1198,6 +1650,9 @@ const styles = StyleSheet.create({
   },
   activeActionButton: {
     backgroundColor: "#ffebee",
+  },
+  actionIconContainer: {
+    marginRight: 2,
   },
   actionText: {
     marginLeft: 6,
@@ -1216,38 +1671,50 @@ const styles = StyleSheet.create({
   commentAvatarText: {
     color: "white",
     fontWeight: "bold",
-    fontSize: 12,
+    fontSize: 14,
   },
-
-  // Modern Modal Styles
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 56 : 16,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#e8eaed',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   modalHeaderLeft: {
     flex: 1,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#333',
+    color: '#1a1a1a',
+    letterSpacing: -0.3,
   },
-  commentCount: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
+  commentCountHeader: {
+    fontSize: 13,
+    color: '#65676b',
+    marginTop: 4,
+    fontWeight: '500',
   },
   closeButton: {
-    padding: 4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f2f5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalContent: {
     flex: 1,
@@ -1256,14 +1723,17 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   commentsSection: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    backgroundColor: '#fff',
   },
   commentsTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    color: '#333',
+    color: '#1a1a1a',
     marginBottom: 16,
-    marginTop: 8,
+    marginTop: 4,
+    letterSpacing: -0.2,
   },
   noComments: {
     alignItems: 'center',
@@ -1284,25 +1754,30 @@ const styles = StyleSheet.create({
   },
   commentItem: {
     flexDirection: 'row',
-    marginBottom: 20,
+    marginBottom: 16,
     padding: 12,
     backgroundColor: '#f8f9fa',
-    borderRadius: 12,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   adminCommentItem: {
-    backgroundColor: '#fff8e1',
-    borderLeftWidth: 3,
-    borderLeftColor: '#e67e22',
+    backgroundColor: '#fff4e6',
+    borderWidth: 1,
+    borderColor: '#ffe0b2',
   },
   commentContent: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
   },
   commentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 0,
   },
   commentAuthorContainer: {
     flexDirection: 'row',
@@ -1312,17 +1787,17 @@ const styles = StyleSheet.create({
   },
   commentAuthor: {
     fontWeight: '600',
-    fontSize: 14,
-    color: '#333',
-    marginRight: 8,
+    fontSize: 15,
+    color: '#1a1a1a',
+    marginRight: 6,
   },
   adminAuthor: {
     color: '#e67e22',
   },
   adminBadge: {
     backgroundColor: '#e67e22',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 4,
   },
   adminBadgeText: {
@@ -1330,167 +1805,304 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
   },
-  commentHeaderRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  commentMenuButton: {
+    padding: 6,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  commentText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    lineHeight: 20,
+    marginTop: 0,
+    marginBottom: 2,
   },
   commentTime: {
-    fontSize: 11,
-    color: '#999',
-    marginRight: 8,
+    fontSize: 12,
+    color: '#65676b',
+    marginTop: 0,
   },
-  commentMenuContainer: {
-    position: 'relative',
+  commentMenuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
-  commentMenuButton: {
-    padding: 4,
+  commentMenuModal: {
+    paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
   },
-  commentMenu: {
-    position: 'absolute',
-    top: 24,
-    right: 0,
+  commentMenuContent: {
     backgroundColor: 'white',
-    borderRadius: 8,
-    paddingVertical: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    minWidth: 120,
-    zIndex: 1000,
+    borderRadius: 14,
+    marginBottom: 8,
+    overflow: 'hidden',
   },
   commentMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  commentMenuDivider: {
+    height: 0.5,
+    backgroundColor: '#e8eaed',
+    marginHorizontal: 16,
   },
   deleteMenuItem: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    // No additional styles needed
   },
   commentMenuItemText: {
-    fontSize: 14,
-    color: '#333',
+    fontSize: 17,
+    color: '#1a1a1a',
+    fontWeight: '400',
   },
   deleteMenuItemText: {
     color: '#e74c3c',
   },
-  commentText: {
-    fontSize: 14,
-    color: '#333',
-    lineHeight: 20,
-    marginBottom: 4,
+  commentMenuCancel: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
   },
-
-  // Edit Comment Interface Styles
+  commentMenuCancelText: {
+    fontSize: 17,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  likesModalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  likesModalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    minHeight: '40%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  likesModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e8eaed',
+  },
+  likesModalHeaderLeft: {
+    flex: 1,
+  },
+  likesModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    letterSpacing: -0.3,
+  },
+  likesModalSubtitle: {
+    fontSize: 14,
+    color: '#65676b',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  likesModalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f2f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  likesListContainer: {
+    paddingVertical: 8,
+  },
+  likeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8f9fa',
+  },
+  likeUserInfo: {
+    marginLeft: 14,
+    flex: 1,
+  },
+  likeUserName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 3,
+    letterSpacing: -0.2,
+  },
+  likeTime: {
+    fontSize: 13,
+    color: '#65676b',
+  },
+  noLikes: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noLikesIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  noLikesText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+    fontWeight: '600',
+  },
+  noLikesSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
+  },
   editCommentContainer: {
     position: 'absolute',
     left: 0,
     right: 0,
     backgroundColor: 'white',
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    padding: 16,
+    borderTopColor: '#e8eaed',
+    padding: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 8,
   },
   editCommentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   editCommentTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    letterSpacing: -0.2,
+  },
+  cancelEditButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f0f2f5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   editCommentInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
+    borderColor: '#e8eaed',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 15,
     minHeight: 100,
     textAlignVertical: 'top',
     backgroundColor: '#f8f9fa',
+    color: '#1a1a1a',
   },
   editCommentActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 12,
+    marginTop: 16,
     gap: 12,
   },
   cancelEditActionButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#f0f2f5',
   },
   cancelEditActionText: {
-    color: '#666',
-    fontSize: 14,
+    color: '#65676b',
+    fontSize: 15,
     fontWeight: '600',
   },
   saveEditActionButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
     backgroundColor: '#007AFF',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveEditActionButtonDisabled: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#e8eaed',
+    shadowOpacity: 0,
   },
   saveEditActionText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
   },
-
-  // Comment Input Styles
   commentInputContainer: {
     position: 'absolute',
     left: 0,
     right: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: 16,
+    padding: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopColor: '#e8eaed',
     backgroundColor: '#fff',
-    gap: 8,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
   },
   commentInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    fontSize: 14,
+    borderColor: '#e8eaed',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    fontSize: 15,
     maxHeight: 100,
-    textAlignVertical: 'center',
+    backgroundColor: '#f8f9fa',
+    color: '#1a1a1a',
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 2,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sendButtonDisabled: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#e8eaed',
+    shadowOpacity: 0,
   },
-
-  // Footer Styles
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",

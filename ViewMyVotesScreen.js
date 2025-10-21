@@ -10,6 +10,38 @@ export default function MyVotesScreen({ route }) {
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // 🔹 Define fixed order for positions (same as other screens)
+  const POSITION_ORDER = [
+    "President",
+    "Vice President", 
+    "Treasurer",
+    "Secretary"
+  ];
+
+  // 🔹 Sort positions based on predefined order
+  const getSortedVotes = (votes) => {
+    if (!votes) return [];
+    
+    return Object.entries(votes).sort(([positionA], [positionB]) => {
+      const indexA = POSITION_ORDER.indexOf(positionA);
+      const indexB = POSITION_ORDER.indexOf(positionB);
+      
+      // If both positions are in the predefined order, sort by that order
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      
+      // If only position A is in predefined order, it comes first
+      if (indexA !== -1) return -1;
+      
+      // If only position B is in predefined order, it comes first  
+      if (indexB !== -1) return 1;
+      
+      // If neither position is in predefined order, sort alphabetically
+      return positionA.localeCompare(positionB);
+    });
+  };
+
   useEffect(() => {
     const fetchMyVotes = async () => {
       try {
@@ -49,10 +81,12 @@ export default function MyVotesScreen({ route }) {
   if (!myVotes || Object.keys(myVotes).length === 0)
     return <Text style={styles.noVoteText}>You haven't voted yet.</Text>;
 
+  const sortedVotes = getSortedVotes(myVotes);
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>My Votes</Text>
-      {Object.entries(myVotes).map(([position, vote]) => {
+      {sortedVotes.map(([position, vote]) => {
         const candidate = candidates.find((c) => c.id === vote.candidateId);
         return (
           <View key={position} style={styles.voteCard}>
@@ -66,9 +100,14 @@ export default function MyVotesScreen({ route }) {
                   <Text style={styles.photoInitial}>{candidate?.name?.charAt(0) || "?"}</Text>
                 </View>
               )}
-              <Text style={styles.candidateName}>
-                {candidate ? candidate.name : "Unknown Candidate"}
-              </Text>
+              <View style={styles.candidateInfo}>
+                <Text style={styles.candidateName}>
+                  {candidate ? candidate.name : "Unknown Candidate"}
+                </Text>
+                {candidate?.termDuration && (
+                  <Text style={styles.termDuration}>Term: {candidate.termDuration}</Text>
+                )}
+              </View>
             </View>
           </View>
         );
@@ -78,29 +117,83 @@ export default function MyVotesScreen({ route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16 },
-  title: { fontSize: 22, fontWeight: "bold", marginBottom: 16 },
+  container: { 
+    padding: 16,
+    backgroundColor: "#f5f7fa",
+    flexGrow: 1
+  },
+  title: { 
+    fontSize: 24, 
+    fontWeight: "bold", 
+    marginBottom: 20, 
+    textAlign: "center",
+    color: "#1976D2"
+  },
   voteCard: {
-    backgroundColor: "#f8f9fa",
-    padding: 12,
-    borderRadius: 8,
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#e0e0e0",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
-  position: { fontSize: 18, fontWeight: "600", marginBottom: 8 },
-  candidateContainer: { flexDirection: "row", alignItems: "center" },
-  candidatePhoto: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
+  position: { 
+    fontSize: 18, 
+    fontWeight: "600", 
+    marginBottom: 12,
+    color: "#00796B",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+    paddingBottom: 8
+  },
+  candidateContainer: { 
+    flexDirection: "row", 
+    alignItems: "center" 
+  },
+  candidatePhoto: { 
+    width: 60, 
+    height: 60, 
+    borderRadius: 30, 
+    marginRight: 16,
+    backgroundColor: "#f0f0f0"
+  },
   photoPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "#ccc",
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#e0e0e0",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
+    marginRight: 16,
   },
-  photoInitial: { fontSize: 20, fontWeight: "bold", color: "#fff" },
-  candidateName: { fontSize: 16, fontWeight: "500" },
-  noVoteText: { fontSize: 18, color: "gray", textAlign: "center", marginTop: 50 },
+  photoInitial: { 
+    fontSize: 20, 
+    fontWeight: "bold", 
+    color: "#666" 
+  },
+  candidateInfo: {
+    flex: 1
+  },
+  candidateName: { 
+    fontSize: 16, 
+    fontWeight: "500",
+    color: "#333",
+    marginBottom: 4
+  },
+  termDuration: {
+    fontSize: 12,
+    color: "#666",
+    fontStyle: "italic"
+  },
+  noVoteText: { 
+    fontSize: 18, 
+    color: "gray", 
+    textAlign: "center", 
+    marginTop: 50 
+  },
 });
