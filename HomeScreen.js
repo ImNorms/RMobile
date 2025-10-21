@@ -18,8 +18,6 @@ import {
   collection,
   query,
   orderBy,
-  limit,
-  onSnapshot,
   getDocs,
   where,
   doc,
@@ -85,7 +83,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [route?.params?.hasNewAnnouncement]);
 
-  // Announcement notifications
+  // Announcement notifications - USING POLLING
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewPostsCount(0);
@@ -118,18 +116,20 @@ export default function HomeScreen({ navigation, route }) {
         setNewPostsCount(count);
         setHasAnnouncement(count > 0);
       } catch (error) {
+        console.log("Announcements check error:", error.message);
         setNewPostsCount(0);
         setHasAnnouncement(false);
       }
     };
 
-    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, checkNewAnnouncements);
-
-    return () => unsubscribe();
+    // Use polling instead of real-time listener
+    checkNewAnnouncements(); // Initial check
+    const interval = setInterval(checkNewAnnouncements, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Event notifications
+  // Event notifications - USING POLLING
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewEventsCount(0);
@@ -175,18 +175,20 @@ export default function HomeScreen({ navigation, route }) {
         setHasEvent(count > 0);
         
       } catch (error) {
+        console.log("Events check error:", error.message);
         setNewEventsCount(0);
         setHasEvent(false);
       }
     };
 
-    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, checkNewEvents);
-
-    return () => unsubscribe();
+    // Use polling instead of real-time listener
+    checkNewEvents(); // Initial check
+    const interval = setInterval(checkNewEvents, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Complaint notifications
+  // Complaint notifications - USING POLLING
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewComplaintsCount(0);
@@ -196,51 +198,60 @@ export default function HomeScreen({ navigation, route }) {
 
     const checkNewComplaints = async () => {
       try {
+        const userId = auth.currentUser.uid;
+
+        // Get status tracking data
+        const trackingData = await AsyncStorage.getItem(`complaintStatusTracking_${userId}`);
+        const statusTracking = trackingData ? JSON.parse(trackingData) : {};
+
+        // SIMPLIFIED QUERY - Remove complex where clauses
         const q = query(
           collection(db, "complaints"),
-          where("userId", "==", auth.currentUser.uid),
-          where("status", "==", "pending"),
-          orderBy("updatedAt", "desc")
+          where("userId", "==", userId) // Only filter by user
         );
+        
         const snapshot = await getDocs(q);
         
-        if (!auth.currentUser || snapshot.empty) {
+        if (snapshot.empty) {
           setNewComplaintsCount(0);
           setHasComplaint(false);
           return;
         }
+
+        let newCount = 0;
         
-        const lastSeenSeconds =
-          Number(
-            await AsyncStorage.getItem(
-              `lastSeenComplaint_${auth.currentUser.uid}`
-            )
-          ) || 0;
-        let count = 0;
         snapshot.docs.forEach((doc) => {
-          const updatedAtSeconds = doc.data().updatedAt?.seconds || 0;
-          if (updatedAtSeconds > lastSeenSeconds) count++;
+          const complaintData = doc.data();
+          const complaintId = doc.id;
+          const currentStatus = complaintData.status;
+          const lastKnownStatus = statusTracking[complaintId];
+
+          // Filter status client-side instead of in query
+          if (["pending", "rejected", "solved"].includes(currentStatus)) {
+            if (!lastKnownStatus || lastKnownStatus !== currentStatus) {
+              newCount++;
+            }
+          }
         });
-        setNewComplaintsCount(count);
-        setHasComplaint(count > 0);
+
+        setNewComplaintsCount(newCount);
+        setHasComplaint(newCount > 0);
+        
       } catch (error) {
+        console.log("Complaints check error:", error.message);
         setNewComplaintsCount(0);
         setHasComplaint(false);
       }
     };
 
-    const q = query(
-      collection(db, "complaints"),
-      where("userId", "==", auth.currentUser.uid),
-      where("status", "==", "pending"),
-      orderBy("updatedAt", "desc")
-    );
-    const unsubscribe = onSnapshot(q, checkNewComplaints);
-
-    return () => unsubscribe();
+    // Use polling instead of real-time listener
+    checkNewComplaints(); // Initial check
+    const interval = setInterval(checkNewComplaints, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Accounting notifications - CLEAN VERSION
+  // Accounting notifications - USING POLLING
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewAccountingCount(0);
@@ -250,7 +261,7 @@ export default function HomeScreen({ navigation, route }) {
 
     const checkNewAccounting = async () => {
       try {
-        // First get the user's account number from members collection
+        // Get user's account number
         const user = auth.currentUser;
         const memberRef = doc(db, "members", user.uid);
         const memberSnap = await getDoc(memberRef);
@@ -269,13 +280,13 @@ export default function HomeScreen({ navigation, route }) {
           return;
         }
 
-        // Query contributions for this user's account number
-        const contributionsQuery = query(
+        // Use query with account number filter
+        const q = query(
           collection(db, "contributions"),
           where("accNo", "==", userAccount)
         );
-
-        const snapshot = await getDocs(contributionsQuery);
+        
+        const snapshot = await getDocs(q);
 
         if (snapshot.empty) {
           setNewAccountingCount(0);
@@ -283,70 +294,36 @@ export default function HomeScreen({ navigation, route }) {
           return;
         }
 
-        // Use document ID instead of timestamp for notifications
-        const lastSeenDocId = await AsyncStorage.getItem(`lastSeenAccountingDoc_${auth.currentUser.uid}`) || '';
+        // Get seen IDs
+        const seenData = await AsyncStorage.getItem(`seenAccountingIds_${user.uid}`);
+        const seenIds = seenData ? JSON.parse(seenData) : [];
 
-        let count = 0;
-        let latestDocId = lastSeenDocId;
-
-        // Check for new contributions by comparing document IDs
-        snapshot.docs.forEach((doc) => {
-          // Count as new if we haven't seen this document ID before
-          if (doc.id !== lastSeenDocId) {
-            count++;
-          }
-
-          // Track the latest document ID
-          if (!latestDocId || doc.id > latestDocId) {
-            latestDocId = doc.id;
+        // Count unseen contributions
+        let newCount = 0;
+        snapshot.docs.forEach(doc => {
+          if (!seenIds.includes(doc.id)) {
+            newCount++;
           }
         });
 
-        setNewAccountingCount(count);
-        setHasAccounting(count > 0);
-        
+        setNewAccountingCount(newCount);
+        setHasAccounting(newCount > 0);
+
       } catch (error) {
+        console.log("Accounting check error:", error.message);
         setNewAccountingCount(0);
         setHasAccounting(false);
       }
     };
 
-    // Check immediately and then set up real-time listener
-    checkNewAccounting();
+    // Use polling instead of real-time listener
+    checkNewAccounting(); // Initial check
+    const interval = setInterval(checkNewAccounting, 60000); // Check every minute
     
-    // Set up real-time listener instead of polling
-    let unsubscribe = () => {};
-    
-    const setupRealTimeListener = async () => {
-      try {
-        const user = auth.currentUser;
-        const memberRef = doc(db, "members", user.uid);
-        const memberSnap = await getDoc(memberRef);
-
-        if (!memberSnap.exists() || !memberSnap.data().accNo) return;
-
-        const userAccount = memberSnap.data().accNo;
-
-        const contributionsQuery = query(
-          collection(db, "contributions"),
-          where("accNo", "==", userAccount)
-        );
-
-        unsubscribe = onSnapshot(contributionsQuery, () => {
-          checkNewAccounting(); // Reuse the same checking logic
-        });
-
-      } catch (error) {
-        // Silent error handling
-      }
-    };
-
-    setupRealTimeListener();
-
-    return () => unsubscribe();
+    return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Calculate total notification count - UPDATED with accounting
+  // Calculate total notification count
   useEffect(() => {
     let count = 0;
     if (hasAnnouncement) count++;
@@ -406,27 +383,34 @@ export default function HomeScreen({ navigation, route }) {
     }
 
     try {
+      const userId = auth.currentUser.uid;
+
+      // Get all user complaints and track their CURRENT status
       const q = query(
         collection(db, "complaints"),
-        where("userId", "==", auth.currentUser.uid),
-        where("status", "==", "pending"),
-        orderBy("updatedAt", "desc"),
-        limit(1)
+        where("userId", "==", userId) // Simplified query
       );
+      
       const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const latestDoc = snapshot.docs[0];
-        const updatedAtSeconds = latestDoc.data().updatedAt?.seconds || 0;
-        await AsyncStorage.setItem(
-          `lastSeenComplaint_${auth.currentUser.uid}`,
-          String(updatedAtSeconds)
-        );
-      }
+      
+      // Create status tracking object with CURRENT status
+      const statusTracking = {};
+      snapshot.docs.forEach(doc => {
+        statusTracking[doc.id] = doc.data().status;
+      });
+      
+      // Save current status tracking
+      await AsyncStorage.setItem(
+        `complaintStatusTracking_${userId}`,
+        JSON.stringify(statusTracking)
+      );
+
       setNewComplaintsCount(0);
       setHasComplaint(false);
       navigation.navigate("Complaints");
+      
     } catch (error) {
-      // Silent error handling
+      navigation.navigate("Complaints");
     }
   };
 
@@ -437,41 +421,39 @@ export default function HomeScreen({ navigation, route }) {
     }
 
     try {
-      // Get the latest contribution document ID to mark as seen
       const user = auth.currentUser;
       const memberRef = doc(db, "members", user.uid);
       const memberSnap = await getDoc(memberRef);
 
       if (memberSnap.exists() && memberSnap.data().accNo) {
         const userAccount = memberSnap.data().accNo;
-        const contributionsQuery = query(
+        
+        // Use filtered query
+        const q = query(
           collection(db, "contributions"),
           where("accNo", "==", userAccount)
         );
+        const snapshot = await getDocs(q);
         
-        const snapshot = await getDocs(contributionsQuery);
-        let latestDocId = '';
-        
-        // Find the latest document ID
-        snapshot.docs.forEach((doc) => {
-          if (!latestDocId || doc.id > latestDocId) {
-            latestDocId = doc.id;
-          }
-        });
-        
-        if (latestDocId) {
-          await AsyncStorage.setItem(
-            `lastSeenAccountingDoc_${auth.currentUser.uid}`,
-            latestDocId
-          );
-        }
+        // Get user's contribution IDs
+        const userContributionIds = snapshot.docs.map(doc => doc.id);
+
+        // Save all user contribution IDs as seen
+        await AsyncStorage.setItem(
+          `seenAccountingIds_${user.uid}`,
+          JSON.stringify(userContributionIds)
+        );
       }
-      
+
       setNewAccountingCount(0);
       setHasAccounting(false);
       navigation.navigate("Accounting");
+      
     } catch (error) {
-      // Silent error handling
+      // Silent error handling - still navigate
+      setNewAccountingCount(0);
+      setHasAccounting(false);
+      navigation.navigate("Accounting");
     }
   };
 
@@ -498,8 +480,9 @@ export default function HomeScreen({ navigation, route }) {
         await AsyncStorage.removeItem(`lastSeenAnnouncement_${userId}`);
         await AsyncStorage.removeItem(`lastSeenEvent_${userId}`);
         await AsyncStorage.removeItem(`lastSeenComplaint_${userId}`);
-        await AsyncStorage.removeItem(`lastSeenAccounting_${userId}`);
-        await AsyncStorage.removeItem(`lastSeenAccountingDoc_${userId}`);
+        await AsyncStorage.removeItem(`seenComplaintIds_${userId}`);
+        await AsyncStorage.removeItem(`complaintStatusTracking_${userId}`);
+        await AsyncStorage.removeItem(`seenAccountingIds_${userId}`);
       }
       
       Alert.alert("Logged out", "You have been logged out successfully.");

@@ -37,7 +37,6 @@ export default function ElectionsScreen() {
   const scrollViewRef = useRef(null);
   const sectionPositions = useRef({});
 
-  // 🔹 Define fixed order for positions
   const POSITION_ORDER = [
     "President",
     "Vice President", 
@@ -45,7 +44,6 @@ export default function ElectionsScreen() {
     "Secretary"
   ];
 
-  // 🔹 Helper to parse string date + time into Date object
   const parseDateTime = (dateStr, timeStr) => {
     try {
       return new Date(`${dateStr}T${timeStr}:00`);
@@ -54,7 +52,6 @@ export default function ElectionsScreen() {
     }
   };
 
-  // 🔹 Check election status + update countdown
   const updateElectionStatus = (start, end, dateStr) => {
     let startDate, endDate;
 
@@ -76,43 +73,36 @@ export default function ElectionsScreen() {
 
     if (now < startDate) {
       setIsActive(false);
-      setTimeMessage(`Voting will start at ${startDate.toLocaleTimeString()}`);
+      setTimeMessage(`Voting starts at ${startDate.toLocaleTimeString()}`);
     } else if (now >= startDate && now <= endDate) {
       setIsActive(true);
       const diff = endDate - now;
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-      setTimeMessage(`🕒 Voting ends in ${hours}h ${minutes}m ${seconds}s`);
+      setTimeMessage(`Ends in ${hours}h ${minutes}m ${seconds}s`);
     } else {
       setIsActive(false);
-      setTimeMessage("⚠️ Voting has ended");
+      setTimeMessage("Voting has ended");
     }
   };
 
-  // 🔹 Sort positions based on predefined order
   const getSortedPositions = (electionsData) => {
     return Object.keys(electionsData).sort((a, b) => {
       const indexA = POSITION_ORDER.indexOf(a);
       const indexB = POSITION_ORDER.indexOf(b);
       
-      // If both positions are in the predefined order, sort by that order
       if (indexA !== -1 && indexB !== -1) {
         return indexA - indexB;
       }
       
-      // If only position A is in predefined order, it comes first
       if (indexA !== -1) return -1;
-      
-      // If only position B is in predefined order, it comes first  
       if (indexB !== -1) return 1;
       
-      // If neither position is in predefined order, sort alphabetically
       return a.localeCompare(b);
     });
   };
 
-  // Fetch elections and candidates
   useEffect(() => {
     const unsubscribeElections = onSnapshot(collection(db, "elections"), (snap) => {
       let grouped = {};
@@ -132,7 +122,6 @@ export default function ElectionsScreen() {
           createdAt: data.createdAt,
         };
 
-        // 🔹 Update status immediately
         updateElectionStatus(data.startTime, data.endTime, data.date);
 
         const candidatesRef = collection(db, "elections", docSnap.id, "candidates");
@@ -166,7 +155,6 @@ export default function ElectionsScreen() {
     return () => unsubscribeElections();
   }, []);
 
-  // 🔹 Keep checking time every second
   useEffect(() => {
     let interval;
     if (eventInfo?.startTime && eventInfo?.endTime && eventInfo?.date) {
@@ -179,7 +167,6 @@ export default function ElectionsScreen() {
     return () => clearInterval(interval);
   }, [eventInfo]);
 
-  // Submit votes
   const handleSubmitAllVotes = async () => {
     try {
       const user = auth.currentUser;
@@ -193,7 +180,6 @@ export default function ElectionsScreen() {
         return;
       }
 
-      // 🔹 Block if voting not active
       if (!isActive) {
         alert("⚠️ Voting is not active right now.");
         return;
@@ -257,7 +243,8 @@ export default function ElectionsScreen() {
   if (loading) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#00695C" />
+        <ActivityIndicator size="large" color="#4F46E5" />
+        <Text style={styles.loadingText}>Loading Election...</Text>
       </View>
     );
   }
@@ -266,153 +253,384 @@ export default function ElectionsScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView ref={scrollViewRef}>
+      <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false}>
         {eventInfo && (
-          <View style={styles.eventCard}>
-            <Text style={styles.eventTitle}>{eventInfo.title}</Text>
-            {eventInfo.date && (
-              <Text style={styles.eventDetail}>📅 Date: {eventInfo.date}</Text>
-            )}
-            {eventInfo.startTime && eventInfo.endTime && (
-              <Text style={styles.eventDetail}>
-                🕒 Time: {eventInfo.startTime} - {eventInfo.endTime}
-              </Text>
-            )}
-            <Text style={{ marginTop: 5, fontWeight: "bold", color: isActive ? "green" : "red" }}>
-              {timeMessage}
-            </Text>
+          <View style={styles.headerContainer}>
+            <View style={styles.eventCard}>
+              <Text style={styles.eventTitle}>{eventInfo.title}</Text>
+              <View style={styles.eventDetailsContainer}>
+                {eventInfo.date && (
+                  <View style={styles.eventDetailRow}>
+                    <Text style={styles.eventIcon}>📅</Text>
+                    <Text style={styles.eventDetail}>{eventInfo.date}</Text>
+                  </View>
+                )}
+                {eventInfo.startTime && eventInfo.endTime && (
+                  <View style={styles.eventDetailRow}>
+                    <Text style={styles.eventIcon}>🕒</Text>
+                    <Text style={styles.eventDetail}>
+                      {eventInfo.startTime} - {eventInfo.endTime}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={[
+                styles.statusBadge,
+                isActive ? styles.statusActive : styles.statusInactive
+              ]}>
+                <View style={[
+                  styles.statusDot,
+                  isActive ? styles.dotActive : styles.dotInactive
+                ]} />
+                <Text style={styles.statusText}>{timeMessage}</Text>
+              </View>
+            </View>
           </View>
         )}
 
-        {sortedPositions.map((position) => (
-          <View
-            key={position}
-            style={styles.section}
-            onLayout={(e) => {
-              sectionPositions.current[position] = e.nativeEvent.layout.y;
-            }}
-          >
-            <Text
-              style={[
-                styles.sectionTitle,
-                missingPositions.includes(position) && { color: "red" },
-              ]}
-            >
-              {position}
-            </Text>
-
-            <FlatList
-              data={elections[position]}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              renderItem={({ item }) => {
-                const isSelected = selectedChoices[position] === item.id;
-
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.card,
-                      isSelected && { borderColor: "#2980b9", borderWidth: 2 },
-                    ]}
-                    onPress={() =>
-                      setSelectedChoices((prev) => {
-                        if (prev[position] === item.id) {
-                          const updated = { ...prev };
-                          delete updated[position];
-                          return updated;
-                        }
-                        return { ...prev, [position]: item.id };
-                      })
-                    }
-                    disabled={!isActive}
-                  >
-                    {item.photoURL ? (
-                      <Image source={{ uri: item.photoURL }} style={styles.image} />
-                    ) : (
-                      <View style={styles.placeholderImage}>
-                        <Text style={styles.initial}>{item.name?.charAt(0)}</Text>
-                      </View>
-                    )}
-
-                    <View style={styles.info}>
-                      <Text style={styles.name}>{item.name}</Text>
-                      <Text style={styles.term}>Position: {item.position}</Text>
-                      {item.termDuration && (
-                        <Text style={styles.term}>Term: {item.termDuration}</Text>
-                      )}
-                    </View>
-
-                    <Text style={styles.radio}>{isSelected ? "🔘" : "⚪"}</Text>
-                  </TouchableOpacity>
-                );
+        <View style={styles.content}>
+          {sortedPositions.map((position, index) => (
+            <View
+              key={position}
+              style={styles.section}
+              onLayout={(e) => {
+                sectionPositions.current[position] = e.nativeEvent.layout.y;
               }}
-            />
-          </View>
-        ))}
+            >
+              <View style={styles.sectionHeader}>
+                <View style={styles.positionBadge}>
+                  <Text style={styles.positionNumber}>{index + 1}</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    missingPositions.includes(position) && styles.sectionTitleError,
+                  ]}
+                >
+                  {position}
+                </Text>
+              </View>
 
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            !isActive && { backgroundColor: "#999" },
-          ]}
-          onPress={handleSubmitAllVotes}
-          disabled={!isActive}
-        >
-          <Text style={styles.submitText}>
-            {isActive ? "Submit All Votes" : "Voting Closed"}
-          </Text>
-        </TouchableOpacity>
+              <FlatList
+                data={elections[position]}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+                renderItem={({ item }) => {
+                  const isSelected = selectedChoices[position] === item.id;
+
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.card,
+                        isSelected && styles.cardSelected,
+                        !isActive && styles.cardDisabled,
+                      ]}
+                      onPress={() =>
+                        setSelectedChoices((prev) => {
+                          if (prev[position] === item.id) {
+                            const updated = { ...prev };
+                            delete updated[position];
+                            return updated;
+                          }
+                          return { ...prev, [position]: item.id };
+                        })
+                      }
+                      disabled={!isActive}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.cardContent}>
+                        {item.photoURL ? (
+                          <Image source={{ uri: item.photoURL }} style={styles.image} />
+                        ) : (
+                          <View style={styles.placeholderImage}>
+                            <Text style={styles.initial}>{item.name?.charAt(0)}</Text>
+                          </View>
+                        )}
+
+                        <View style={styles.info}>
+                          <Text style={styles.name}>{item.name}</Text>
+                          <Text style={styles.position}>{item.position}</Text>
+                          {item.termDuration && (
+                            <Text style={styles.term}>Term: {item.termDuration}</Text>
+                          )}
+                        </View>
+
+                        <View style={[
+                          styles.radioContainer,
+                          isSelected && styles.radioSelected
+                        ]}>
+                          {isSelected && <View style={styles.radioInner} />}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            </View>
+          ))}
+
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              !isActive && styles.submitButtonDisabled,
+            ]}
+            onPress={handleSubmitAllVotes}
+            disabled={!isActive}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.submitText}>
+              {isActive ? "Submit All Votes" : "Voting Closed"}
+            </Text>
+            {isActive && <Text style={styles.submitIcon}>→</Text>}
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f4f4f4", padding: 10 },
-  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-  eventCard: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-    elevation: 3,
+  container: { 
+    flex: 1, 
+    backgroundColor: "#F8FAFC",
   },
-  eventTitle: { fontSize: 20, fontWeight: "bold", marginBottom: 5 },
-  eventDetail: { fontSize: 14, color: "#555", marginBottom: 3 },
+  loader: { 
+    flex: 1, 
+    justifyContent: "center", 
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#64748B",
+    fontWeight: "500",
+  },
 
-  section: { marginBottom: 25 },
-  sectionTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    marginBottom: 10,
-    padding: 10,
+  headerContainer: {
+    backgroundColor: "#004d40",
+    paddingTop: 60,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+  },
+  eventCard: {
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  eventTitle: { 
+    fontSize: 24, 
+    fontWeight: "700", 
+    marginBottom: 16,
+    color: "#1E293B",
+  },
+  eventDetailsContainer: {
+    marginBottom: 16,
+  },
+  eventDetailRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 8,
+  },
+  eventIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  eventDetail: { 
+    fontSize: 15, 
+    color: "#64748B",
+    fontWeight: "500",
+  },
+
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+  },
+  statusActive: {
+    backgroundColor: "#DCFCE7",
+  },
+  statusInactive: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  dotActive: {
+    backgroundColor: "#16A34A",
+  },
+  dotInactive: {
+    backgroundColor: "#DC2626",
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1E293B",
+  },
+
+  content: {
+    padding: 20,
+  },
+  section: { 
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  positionBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#4F46E5",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  positionNumber: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  sectionTitle: { 
+    fontSize: 20, 
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  sectionTitleError: {
+    color: "#DC2626",
+  },
+
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    marginBottom: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 2,
   },
-  image: { width: 60, height: 60, borderRadius: 30 },
+  cardSelected: {
+    borderColor: "#4F46E5",
+    backgroundColor: "#EEF2FF",
+  },
+  cardDisabled: {
+    opacity: 0.6,
+  },
+  cardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  image: { 
+    width: 64, 
+    height: 64, 
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: "#E2E8F0",
+  },
   placeholderImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#ccc",
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#CBD5E1",
     justifyContent: "center",
     alignItems: "center",
   },
-  initial: { fontSize: 20, fontWeight: "bold", color: "#fff" },
-  info: { flex: 1, marginLeft: 15 },
-  name: { fontSize: 16, fontWeight: "bold" },
-  term: { fontSize: 12, color: "#777" },
-  radio: { fontSize: 20, marginLeft: 10 },
-  submitButton: {
-    backgroundColor: "#2C3E50",
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 20,
-    marginBottom: 30,
+  initial: { 
+    fontSize: 24, 
+    fontWeight: "700", 
+    color: "#FFFFFF",
   },
-  submitText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
+
+  info: { 
+    flex: 1, 
+    marginLeft: 16,
+  },
+  name: { 
+    fontSize: 17, 
+    fontWeight: "600",
+    color: "#1E293B",
+    marginBottom: 4,
+  },
+  position: {
+    fontSize: 14,
+    color: "#64748B",
+    fontWeight: "500",
+    marginBottom: 2,
+  },
+  term: { 
+    fontSize: 13, 
+    color: "#94A3B8",
+  },
+
+  radioContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#CBD5E1",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 12,
+  },
+  radioSelected: {
+    borderColor: "#4F46E5",
+    backgroundColor: "#4F46E5",
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+  },
+
+  submitButton: {
+    backgroundColor: "#4F46E5",
+    paddingVertical: 18,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: 30,
+    flexDirection: "row",
+    justifyContent: "center",
+    shadowColor: "#4F46E5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  submitButtonDisabled: {
+    backgroundColor: "#94A3B8",
+    shadowOpacity: 0,
+  },
+  submitText: { 
+    color: "#FFFFFF", 
+    fontWeight: "700", 
+    fontSize: 17,
+  },
+  submitIcon: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "700",
+    marginLeft: 8,
+  },
 });
