@@ -1,5 +1,5 @@
-// ComplaintsScreen.js
-import React, { useEffect, useState } from "react";
+// ComplaintsScreen.js - Fixed Version (No onSnapshot)
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -10,8 +10,9 @@ import {
   Linking,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from "react-native";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import { getAuth, signOut } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,35 +20,93 @@ import { Ionicons } from "@expo/vector-icons";
 export default function ComplaintsScreen({ navigation }) {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const auth = getAuth();
+  const user = auth.currentUser;
+  const pollingInterval = useRef(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
-    const auth = getAuth();
-    const user = auth.currentUser;
-    if (!user) {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
+    };
+  }, []);
+
+  const loadComplaints = async () => {
+    if (!user || !isMounted.current) {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
-    const q = query(
-      collection(db, "complaints"),
-      where("userId", "==", user.uid),
-      orderBy("createdAt", "desc")
-    );
+    try {
+      const q = query(
+        collection(db, "complaints"),
+        where("userId", "==", user.uid),
+        orderBy("createdAt", "desc")
+      );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const snapshot = await getDocs(q);
+      
+      if (!isMounted.current) return;
+
       const list = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
+      
       setComplaints(list);
       setLoading(false);
-    });
+      setRefreshing(false);
+    } catch (error) {
+      console.log("Error loading complaints:", error.message);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  };
 
-    return unsubscribe;
-  }, []);
+  const startPolling = () => {
+    // Load initial data
+    loadComplaints();
+    
+    // Set up polling every 30 seconds
+    pollingInterval.current = setInterval(loadComplaints, 30000);
+  };
+
+  const stopPolling = () => {
+    if (pollingInterval.current) {
+      clearInterval(pollingInterval.current);
+      pollingInterval.current = null;
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadComplaints();
+  };
+
+  useEffect(() => {
+    if (user) {
+      startPolling();
+    } else {
+      setLoading(false);
+    }
+
+    return () => {
+      stopPolling();
+    };
+  }, [user]);
 
   const handleLogout = async () => {
     try {
+      stopPolling();
       const auth = getAuth();
       await signOut(auth);
       navigation.reset({
@@ -243,6 +302,14 @@ export default function ComplaintsScreen({ navigation }) {
         }
         contentContainerStyle={{ paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#007AFF"]}
+            tintColor="#007AFF"
+          />
+        }
       />
 
       <TouchableOpacity

@@ -44,6 +44,9 @@ export default function HomeScreen({ navigation, route }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
+  // Polling interval constant - changed from 60000 to 15000 (1 min to 15 sec)
+  const POLLING_INTERVAL = 15000;
+
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -83,7 +86,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [route?.params?.hasNewAnnouncement]);
 
-  // Announcement notifications - USING POLLING
+  // Announcement notifications - USING POLLING (15 seconds)
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewPostsCount(0);
@@ -122,14 +125,14 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
 
-    // Use polling instead of real-time listener
+    // Use polling instead of real-time listener - 15 seconds
     checkNewAnnouncements(); // Initial check
-    const interval = setInterval(checkNewAnnouncements, 60000); // Check every minute
+    const interval = setInterval(checkNewAnnouncements, POLLING_INTERVAL);
     
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Event notifications - USING POLLING
+  // Event notifications - USING POLLING (15 seconds)
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewEventsCount(0);
@@ -181,14 +184,14 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
 
-    // Use polling instead of real-time listener
+    // Use polling instead of real-time listener - 15 seconds
     checkNewEvents(); // Initial check
-    const interval = setInterval(checkNewEvents, 60000); // Check every minute
+    const interval = setInterval(checkNewEvents, POLLING_INTERVAL);
     
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Complaint notifications - USING POLLING
+  // Complaint notifications - USING POLLING (15 seconds)
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewComplaintsCount(0);
@@ -244,14 +247,14 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
 
-    // Use polling instead of real-time listener
+    // Use polling instead of real-time listener - 15 seconds
     checkNewComplaints(); // Initial check
-    const interval = setInterval(checkNewComplaints, 60000); // Check every minute
+    const interval = setInterval(checkNewComplaints, POLLING_INTERVAL);
     
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Accounting notifications - USING POLLING
+  // Accounting notifications - USING POLLING (15 seconds)
   useEffect(() => {
     if (!isAuthenticated || !auth.currentUser) {
       setNewAccountingCount(0);
@@ -316,9 +319,9 @@ export default function HomeScreen({ navigation, route }) {
       }
     };
 
-    // Use polling instead of real-time listener
+    // Use polling instead of real-time listener - 15 seconds
     checkNewAccounting(); // Initial check
-    const interval = setInterval(checkNewAccounting, 60000); // Check every minute
+    const interval = setInterval(checkNewAccounting, POLLING_INTERVAL);
     
     return () => clearInterval(interval);
   }, [isAuthenticated]);

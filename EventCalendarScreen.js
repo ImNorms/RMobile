@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -9,8 +9,10 @@ import {
   TouchableOpacity,
   Alert,
   useWindowDimensions,
+  RefreshControl,
+  ActivityIndicator,
 } from "react-native";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db, auth } from "./firebaseConfig";
 import { signOut } from "firebase/auth";
 import { Calendar } from "react-native-calendars";
@@ -31,94 +33,142 @@ export default function EventCalendarScreen({ navigation, route }) {
   const [selectedDateEvents, setSelectedDateEvents] = useState([]);
   const [selectedDateStr, setSelectedDateStr] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split("T")[0]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const isSmallScreen = width < 375;
   const isTablet = width > 768;
 
-  // Fetch events without notification tracking
+  const pollingInterval = useRef(null);
+  const isMounted = useRef(true);
+
   useEffect(() => {
-    if (!auth.currentUser) {
-      setEvents([]);
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
+    };
+  }, []);
+
+  const loadEvents = async () => {
+    if (!auth.currentUser || !isMounted.current) {
+      setLoading(false);
+      setRefreshing(false);
       return;
     }
 
-    const eventsRef = collection(db, "events");
-    const q = query(eventsRef, orderBy("start", "desc"));
+    try {
+      const eventsRef = collection(db, "events");
+      const q = query(eventsRef, orderBy("start", "desc"));
 
-    const unsubscribe = onSnapshot(q, 
-      (snapshot) => {
-        // Check if user still exists before processing data
-        if (!auth.currentUser) {
-          return;
-        }
+      const snapshot = await getDocs(q);
+      
+      if (!isMounted.current) return;
 
-        const data = snapshot.docs
-          .map((doc) => {
-            const item = { id: doc.id, ...doc.data() };
-            if (item.start && item.start.seconds) {
-              item.dateObj = new Date(item.start.seconds * 1000);
-            } else if (item.start) {
-              item.dateObj = new Date(item.start);
-            }
-            return item;
-          })
-          .filter((e) => e.dateObj && !isNaN(e.dateObj.getTime()));
-
-        const today = new Date();
-        const upcoming = [];
-        const past = [];
-
-        data.forEach((event) => {
-          if (event.dateObj >= today) {
-            upcoming.push(event);
-          } else {
-            past.push(event);
+      const data = snapshot.docs
+        .map((doc) => {
+          const item = { id: doc.id, ...doc.data() };
+          if (item.start && item.start.seconds) {
+            item.dateObj = new Date(item.start.seconds * 1000);
+          } else if (item.start) {
+            item.dateObj = new Date(item.start);
           }
-        });
+          return item;
+        })
+        .filter((e) => e.dateObj && !isNaN(e.dateObj.getTime()));
 
-        upcoming.sort((a, b) => a.dateObj - b.dateObj);
-        past.sort((a, b) => b.dateObj - a.dateObj);
+      const today = new Date();
+      const upcoming = [];
+      const past = [];
 
-        const sortedData = [...upcoming, ...past];
-        setEvents(sortedData);
-
-        // Marked Dates for Calendar
-        let marks = {};
-        const todayYear = today.getFullYear();
-        const todayMonth = today.getMonth() + 1;
-        const todayDay = today.getDate();
-        const todayStr = `${todayYear}-${todayMonth.toString().padStart(2, "0")}-${todayDay
-          .toString()
-          .padStart(2, "0")}`;
-
-        sortedData.forEach((event) => {
-          const eventYear = event.dateObj.getFullYear();
-          const eventMonth = event.dateObj.getMonth() + 1;
-          const eventDay = event.dateObj.getDate();
-          const dateStr = `${eventYear}-${eventMonth
-            .toString()
-            .padStart(2, "0")}-${eventDay.toString().padStart(2, "0")}`;
-
-          marks[dateStr] = {
-            marked: true,
-            dotColor: dateStr === todayStr ? "orange" : "#00695C",
-          };
-        });
-        setMarkedDates(marks);
-      },
-      (error) => {
-        console.error("Error fetching events:", error);
-        if (error.code === 'failed-precondition') {
-          console.log("Missing Firestore index for events query");
-          Alert.alert("Database Error", "Please contact administrator to set up required database indexes.");
+      data.forEach((event) => {
+        if (event.dateObj >= today) {
+          upcoming.push(event);
+        } else {
+          past.push(event);
         }
+      });
+
+      upcoming.sort((a, b) => a.dateObj - b.dateObj);
+      past.sort((a, b) => b.dateObj - a.dateObj);
+
+      const sortedData = [...upcoming, ...past];
+      setEvents(sortedData);
+
+      // Marked Dates for Calendar
+      let marks = {};
+      const todayYear = today.getFullYear();
+      const todayMonth = today.getMonth() + 1;
+      const todayDay = today.getDate();
+      const todayStr = `${todayYear}-${todayMonth.toString().padStart(2, "0")}-${todayDay
+        .toString()
+        .padStart(2, "0")}`;
+
+      sortedData.forEach((event) => {
+        const eventYear = event.dateObj.getFullYear();
+        const eventMonth = event.dateObj.getMonth() + 1;
+        const eventDay = event.dateObj.getDate();
+        const dateStr = `${eventYear}-${eventMonth
+          .toString()
+          .padStart(2, "0")}-${eventDay.toString().padStart(2, "0")}`;
+
+        marks[dateStr] = {
+          marked: true,
+          dotColor: dateStr === todayStr ? "orange" : "#00695C",
+        };
+      });
+      setMarkedDates(marks);
+
+      setLoading(false);
+      setRefreshing(false);
+
+    } catch (error) {
+      console.error("Error fetching events:", error);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
       }
-    );
+      if (error.code === 'failed-precondition') {
+        console.log("Missing Firestore index for events query");
+        Alert.alert("Database Error", "Please contact administrator to set up required database indexes.");
+      }
+    }
+  };
+
+  const startPolling = () => {
+    // Load initial data
+    loadEvents();
+    
+    // Set up polling every 30 seconds
+    pollingInterval.current = setInterval(loadEvents, 30000);
+  };
+
+  const stopPolling = () => {
+    if (pollingInterval.current) {
+      clearInterval(pollingInterval.current);
+      pollingInterval.current = null;
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadEvents();
+  };
+
+  // Fetch events without notification tracking
+  useEffect(() => {
+    if (auth.currentUser) {
+      startPolling();
+    } else {
+      setLoading(false);
+    }
 
     return () => {
-      unsubscribe();
+      stopPolling();
     };
   }, [auth.currentUser]);
 
@@ -145,8 +195,10 @@ export default function EventCalendarScreen({ navigation, route }) {
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       if (!user) {
+        stopPolling();
         setEvents([]);
         setMarkedDates({});
+        setLoading(false);
         console.log("User logged out - reset event states");
       }
     });
@@ -156,6 +208,7 @@ export default function EventCalendarScreen({ navigation, route }) {
 
   const handleLogout = async () => {
     try {
+      stopPolling();
       setEvents([]);
       setMarkedDates({});
       
@@ -221,6 +274,15 @@ export default function EventCalendarScreen({ navigation, route }) {
     }
   };
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#00695C" />
+        <Text style={styles.loadingText}>Loading events...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -232,6 +294,14 @@ export default function EventCalendarScreen({ navigation, route }) {
         keyExtractor={(item) => item.id}
         renderItem={renderEvent}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#00695C"]}
+            tintColor="#00695C"
+          />
+        }
         ListHeaderComponent={
           <>
             <View style={styles.calendarContainer}>
@@ -327,6 +397,18 @@ export default function EventCalendarScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc" },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#64748B",
+    fontWeight: "500",
+  },
   header: {
     backgroundColor: "#00695C",
     paddingTop: 50,

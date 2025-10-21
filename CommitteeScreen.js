@@ -70,7 +70,6 @@ export default function CommitteeScreen({ navigation }) {
         id: doc.id,
         ...doc.data(),
       }));
-      console.log("Board of Directors data:", data); // Debug log
       setMembers(data);
     } catch (error) {
       console.error("Error fetching board of directors:", error);
@@ -81,7 +80,6 @@ export default function CommitteeScreen({ navigation }) {
           id: doc.id,
           ...doc.data(),
         }));
-        console.log("Board of Directors data (no ordering):", data);
         setMembers(data);
       } catch (secondError) {
         console.error("Error with fallback fetch:", secondError);
