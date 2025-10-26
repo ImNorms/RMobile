@@ -460,6 +460,14 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
+  const handleOpenFolders = () => {
+    if (!auth.currentUser) {
+      Alert.alert("Authentication Required", "Please log in to view folders");
+      return;
+    }
+    navigation.navigate("Folders");
+  };
+
   const handleLogout = async () => {
     try {
       // Clear all state first
@@ -765,6 +773,23 @@ export default function HomeScreen({ navigation, route }) {
                 <Text style={styles.cardSubtext}>Cast your vote</Text>
               </TouchableOpacity>
             </View>
+
+            {/* NEW FOLDER ROW */}
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.card, styles.folderCard]}
+                onPress={handleOpenFolders}
+              >
+                <View style={styles.cardIcon}>
+                  <Ionicons name="folder" size={24} color="#fff" />
+                </View>
+                <Text style={styles.cardText}>Folders</Text>
+                <Text style={styles.cardSubtext}>Documents & Files</Text>
+              </TouchableOpacity>
+
+              {/* Empty card to maintain grid layout */}
+              <View style={[styles.card, styles.emptyCard]} />
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -1059,6 +1084,16 @@ const styles = StyleSheet.create({
   },
   votingCard: {
     backgroundColor: "#8E44AD",
+  },
+  // NEW FOLDER CARD STYLES
+  folderCard: {
+    backgroundColor: "#6c5ce7",
+  },
+  emptyCard: {
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   redDot: {
     position: "absolute",

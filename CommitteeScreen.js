@@ -63,7 +63,6 @@ export default function CommitteeScreen({ navigation }) {
     try {
       setLoading(true);
       fadeAnim.setValue(0);
-      // FIXED: Use name field for ordering instead of positionIndex
       const q = query(collection(db, "board_of_directors"), orderBy("name", "asc"));
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map((doc) => ({
@@ -72,8 +71,6 @@ export default function CommitteeScreen({ navigation }) {
       }));
       setMembers(data);
     } catch (error) {
-      console.error("Error fetching board of directors:", error);
-      // Fallback: try without ordering
       try {
         const snapshot = await getDocs(collection(db, "board_of_directors"));
         const data = snapshot.docs.map((doc) => ({
@@ -82,7 +79,6 @@ export default function CommitteeScreen({ navigation }) {
         }));
         setMembers(data);
       } catch (secondError) {
-        console.error("Error with fallback fetch:", secondError);
         setMembers([]);
       }
     } finally {
@@ -101,7 +97,7 @@ export default function CommitteeScreen({ navigation }) {
       }));
       setMembers(data);
     } catch (error) {
-      console.error("Error fetching committee officers:", error);
+      // Silent error handling
     } finally {
       setLoading(false);
     }
@@ -111,15 +107,78 @@ export default function CommitteeScreen({ navigation }) {
     try {
       setLoading(true);
       fadeAnim.setValue(0);
-      const q = query(collection(db, "elected_officials"), orderBy("positionIndex", "asc"));
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      
+      const snapshot = await getDocs(collection(db, "elected_officials"));
+      
+      const data = snapshot.docs.map((doc) => {
+        const docData = doc.data();
+        
+        // Extract name from various possible field names
+        const name = docData.name || docData.memberName || docData.fullName || 
+                    docData.firstName + ' ' + docData.lastName || "Unknown Name";
+        
+        // Extract position from various possible field names
+        const position = docData.position || docData.role || docData.title || 
+                        docData.designation || "Unknown Position";
+        
+        // Extract contact from various possible field names
+        const contactNo = docData.contactNo || docData.phone || docData.mobile || 
+                         docData.telephone || docData.contactNumber || "";
+        
+        // Extract email
+        const email = docData.email || docData.emailAddress || "";
+        
+        // Extract address
+        const address = docData.address || docData.location || docData.residence || "";
+        
+        // Extract photo URL from various possible field names
+        const photoURL = docData.photoURL || docData.photolRL || docData.imageURL || 
+                        docData.profilePicture || docData.image || docData.avatar || 
+                        "https://via.placeholder.com/80";
+        
+        // Extract term duration from various possible field names
+        const termDuration = docData.termDuration || docData.terminuration || 
+                           docData.term || docData.duration || "N/A";
+        
+        // Extract date elected from various possible field names
+        const dateElected = docData.dateElected || docData.electedDate || 
+                          docData.startDate || docData.joinedDate || "N/A";
+        
+        return {
+          id: doc.id,
+          name: name,
+          position: position,
+          email: email,
+          contactNo: contactNo,
+          address: address,
+          photoURL: photoURL,
+          termDuration: termDuration,
+          dateElected: dateElected,
+        };
+      });
+      
       setMembers(data);
+      
     } catch (error) {
-      console.error("Error fetching executive officers:", error);
+      // Last resort: get raw data without any processing
+      try {
+        const snapshot = await getDocs(collection(db, "elected_officials"));
+        const rawData = [];
+        
+        snapshot.docs.forEach((doc) => {
+          const docData = doc.data();
+          rawData.push({
+            id: doc.id,
+            ...docData
+          });
+        });
+        
+        setMembers(rawData);
+        
+      } catch (finalError) {
+        Alert.alert("Error", "Failed to load executive officers");
+        setMembers([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -209,9 +268,96 @@ export default function CommitteeScreen({ navigation }) {
     );
   };
 
+  // Enhanced member card to handle any data structure
+  const renderMemberCard = (member, index) => {
+    // Safely extract data with fallbacks
+    const name = member.name || member.memberName || member.fullName || "Unknown Name";
+    const position = member.position || member.role || member.title || "Unknown Position";
+    const contactNo = member.contactNo || member.phone || member.mobile || "";
+    const email = member.email || member.emailAddress || "";
+    const photoURL = member.photoURL || member.photolRL || member.imageURL || "https://via.placeholder.com/80";
+    const termDuration = member.termDuration || member.terminuration || member.term || "N/A";
+    const dateElected = member.dateElected || member.electedDate || "N/A";
+
+    return (
+      <View 
+        key={member.id || index} 
+        style={[
+          styles.memberCard,
+          { borderLeftColor: getCommitteeColor() }
+        ]}
+      >
+        <View style={styles.memberHeader}>
+          <View style={styles.imageContainer}>
+            <Image
+              source={{ uri: photoURL }}
+              style={styles.memberImage}
+              defaultSource={{ uri: "https://via.placeholder.com/80" }}
+            />
+            <View style={[styles.statusIndicator, { backgroundColor: getCommitteeColor() }]} />
+          </View>
+          <View style={styles.memberBasicInfo}>
+            <Text style={styles.memberName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={[styles.memberRole, { color: getCommitteeColor() }]} numberOfLines={1}>
+              {position}
+            </Text>
+            <View style={styles.contactIcons}>
+              {contactNo && (
+                <Ionicons name="call" size={16} color="#64748B" />
+              )}
+              {email && (
+                <Ionicons name="mail" size={16} color="#64748B" style={styles.contactIcon} />
+              )}
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.memberDetails}>
+          {(contactNo || email) && (
+            <View style={styles.detailRow}>
+              {contactNo && (
+                <View style={styles.detailItem}>
+                  <Ionicons name="call-outline" size={16} color="#64748B" />
+                  <Text style={styles.detailText} numberOfLines={1}>
+                    {contactNo}
+                  </Text>
+                </View>
+              )}
+              {email && (
+                <View style={styles.detailItem}>
+                  <Ionicons name="mail-outline" size={16} color="#64748B" />
+                  <Text style={styles.detailText} numberOfLines={1}>
+                    {email}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+          
+          <View style={styles.detailRow}>
+            <View style={styles.detailItem}>
+              <Ionicons name="calendar-outline" size={16} color="#64748B" />
+              <Text style={styles.detailText} numberOfLines={1}>
+                {dateElected || "Elected: N/A"}
+              </Text>
+            </View>
+            <View style={styles.detailItem}>
+              <Ionicons name="time-outline" size={16} color="#64748B" />
+              <Text style={styles.detailText} numberOfLines={1}>
+                {termDuration || "Term: N/A"}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      {/* Modern Header with Updated Color */}
+      {/* Header */}
       <View style={[styles.header, isLandscape && styles.landscapeHeader]}>
         <View style={styles.headerBackground} />
         <View style={styles.headerContent}>
@@ -225,7 +371,7 @@ export default function CommitteeScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Committee Selection - Compact Horizontal Scroll */}
+      {/* Committee Selection */}
       <View style={styles.committeeSection}>
         <Text style={styles.committeeSectionTitle}>Select Committee</Text>
         <ScrollView 
@@ -263,80 +409,7 @@ export default function CommitteeScreen({ navigation }) {
             contentContainerStyle={styles.membersList}
           >
             {members.length > 0 ? (
-              members.map((member, index) => (
-                <View 
-                  key={member.id || index} 
-                  style={[
-                    styles.memberCard,
-                    { borderLeftColor: getCommitteeColor() }
-                  ]}
-                >
-                  <View style={styles.memberHeader}>
-                    <View style={styles.imageContainer}>
-                      <Image
-                        source={{ uri: member.photoURL || "https://via.placeholder.com/80" }}
-                        style={styles.memberImage}
-                        defaultSource={{ uri: "https://via.placeholder.com/80" }}
-                      />
-                      <View style={[styles.statusIndicator, { backgroundColor: getCommitteeColor() }]} />
-                    </View>
-                    <View style={styles.memberBasicInfo}>
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {member.name}
-                      </Text>
-                      <Text style={[styles.memberRole, { color: getCommitteeColor() }]} numberOfLines={1}>
-                        {member.position}
-                      </Text>
-                      <View style={styles.contactIcons}>
-                        {member.contactNo && (
-                          <Ionicons name="call" size={16} color="#64748B" />
-                        )}
-                        {member.email && (
-                          <Ionicons name="mail" size={16} color="#64748B" style={styles.contactIcon} />
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.memberDetails}>
-                    {(member.contactNo || member.email) && (
-                      <View style={styles.detailRow}>
-                        {member.contactNo && (
-                          <View style={styles.detailItem}>
-                            <Ionicons name="call-outline" size={16} color="#64748B" />
-                            <Text style={styles.detailText} numberOfLines={1}>
-                              {member.contactNo}
-                            </Text>
-                          </View>
-                        )}
-                        {member.email && (
-                          <View style={styles.detailItem}>
-                            <Ionicons name="mail-outline" size={16} color="#64748B" />
-                            <Text style={styles.detailText} numberOfLines={1}>
-                              {member.email}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
-                    
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="calendar-outline" size={16} color="#64748B" />
-                        <Text style={styles.detailText} numberOfLines={1}>
-                          {member.dateElected || "Elected: N/A"}
-                        </Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="time-outline" size={16} color="#64748B" />
-                        <Text style={styles.detailText} numberOfLines={1}>
-                          {member.termDuration || "Term: N/A"}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              ))
+              members.map((member, index) => renderMemberCard(member, index))
             ) : (
               <View style={styles.emptyState}>
                 <View style={[styles.emptyIcon, { backgroundColor: `${getCommitteeColor()}15` }]}>
@@ -352,7 +425,7 @@ export default function CommitteeScreen({ navigation }) {
         )}
       </View>
 
-      {/* Footer - Same as MembersScreen */}
+      {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.footerButton}
@@ -399,7 +472,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#004d40', // Updated to match MembersScreen header color
+    backgroundColor: '#004d40',
   },
   landscapeHeader: {
     paddingTop: responsiveSize(35),
@@ -518,7 +591,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     marginTop: 0,
-    paddingBottom: 80, // Added padding to accommodate footer
+    paddingBottom: 80,
   },
   landscapeMembersContainer: {
     paddingHorizontal: 12,
@@ -675,7 +748,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
-  // Footer styles from MembersScreen
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",

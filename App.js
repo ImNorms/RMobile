@@ -17,6 +17,7 @@ import VotingScreen from "./VotingScreen";
 import ElectionsScreen from "./ElectionsScreen";
 import ElectionStatusScreen from "./ElectionStatusScreen";
 import ViewMyVotesScreen from "./ViewMyVotesScreen";
+import FolderScreen from "./FolderScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -27,7 +28,7 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Announcement" component={AnnouncementScreen} />
-        <Stack.Screen name="EventCalendar" component={EventCalendarScreen} />  
+        <Stack.Screen name="EventCalendar" component={EventCalendarScreen} />
         <Stack.Screen name="Voting" component={VotingScreen} />
         <Stack.Screen name="Accounting" component={AccountingScreen} />
         <Stack.Screen name="Complaints" component={ComplaintsScreen} />
@@ -38,10 +39,8 @@ export default function App() {
         <Stack.Screen name="Elections" component={ElectionsScreen} />
         <Stack.Screen name="ElectionStatus" component={ElectionStatusScreen} />
         <Stack.Screen name="MyVotes" component={ViewMyVotesScreen} />
-        
-        </Stack.Navigator>
+        <Stack.Screen name="Folders" component={FolderScreen} options={{ headerShown: false }} />
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }
-
-
