@@ -677,7 +677,7 @@ NOT the entire string with &apiKey=...`;
           <Text style={styles.welcomeSubtitle}>
             Welcome to the Management {"\n"}System of the SMUMHOA Inc.
           </Text>
-          <Image source={require("./assets/logo.png")} style={styles.logo} />
+          <Image source={require("./assets/logo1.png")} style={styles.logo} />
         </View>
 
         <View style={styles.form}>
